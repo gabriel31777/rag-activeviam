@@ -1,13 +1,14 @@
-# Ignorar ambiente virtual e chaves
 .env
-.venv/
-env/
 __pycache__/
 *.pyc
-
-# Ignorar banco de dados local (ele é gerado pelo script 03)
-data/chroma/
-
-# Ignorar arquivos do sistema
-.DS_Store
-Thumbs.db
+*.pyo
+.eggs/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.idea/
+.vscode/
+*.swp
+*.swo

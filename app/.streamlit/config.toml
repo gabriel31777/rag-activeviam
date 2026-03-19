@@ -1,0 +1,8 @@
+[server]
+enableStaticServing = false
+
+[client]
+showSidebarNavigation = false
+
+[ui]
+hideTopBar = true

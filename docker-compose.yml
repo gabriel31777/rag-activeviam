@@ -1,0 +1,35 @@
+version: "3.9"
+
+services:
+
+  rag_app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+
+    container_name: rag_app
+
+    ports:
+      - "8501:8501"
+
+    env_file:
+      - .env
+
+    environment:
+      - DOCUMENTS_PATH=/data/documents
+      - VECTORDB_PATH=/data/vectordb
+
+    volumes:
+      - rag_documents:/data/documents
+      - rag_vectordb:/data/vectordb
+
+    restart: unless-stopped
+
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+
+volumes:
+  rag_documents:
+  rag_vectordb:
