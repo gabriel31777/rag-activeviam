@@ -1,5 +1,6 @@
 [server]
 enableStaticServing = false
+fileWatcherType = "none"
 
 [client]
 showSidebarNavigation = false

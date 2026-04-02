@@ -94,6 +94,7 @@ class VectorStore:
                     "dataset": c["dataset"],
                     "source": c["source"],
                     "page": c["page"] if c["page"] is not None else -1,
+                    "chunk_type": c.get("chunk_type", "content"),
                 }
                 for c in batch_chunks
             ]
@@ -142,6 +143,7 @@ class VectorStore:
                     "text": results["documents"][0][i],
                     "source": meta.get("source", ""),
                     "page": page if page != -1 else None,
+                    "chunk_type": meta.get("chunk_type", "content"),
                     "score": results["distances"][0][i],
                 }
             )
@@ -170,6 +172,7 @@ class VectorStore:
                     "text": results["documents"][i],
                     "source": meta.get("source", ""),
                     "page": page if page != -1 else None,
+                    "chunk_type": meta.get("chunk_type", "content"),
                 }
             )
         return output

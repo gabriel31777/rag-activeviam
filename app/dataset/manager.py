@@ -104,13 +104,17 @@ class DatasetManager:
 
     def delete_document(self, dataset: str, filename: str) -> None:
         """Delete a single document from a dataset."""
-        file_path = os.path.join(self.documents_root, dataset, filename)
+        file_path = self.get_document_path(dataset, filename)
         if os.path.isfile(file_path):
             os.remove(file_path)
             logger.info("Deleted document: %s/%s", dataset, filename)
 
     def get_dataset_path(self, dataset: str) -> str:
         return os.path.join(self.documents_root, dataset)
+
+    def get_document_path(self, dataset: str, filename: str) -> str:
+        """Return the absolute path to a document."""
+        return os.path.join(self.get_dataset_path(dataset), filename)
 
     def get_vectordb_path(self, dataset: str) -> str:
         return os.path.join(self.vectordb_root, dataset)

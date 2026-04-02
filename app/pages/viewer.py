@@ -1,19 +1,16 @@
 """Document Viewer page – inspect extracted content of uploaded documents."""
 
-import os
-
 import streamlit as st
 
-from dataset.loaders import load_document
-from dataset.manager import DatasetManager
+from services.viewer_service import ViewerService
 
 
 def render():
     """Render the Document Viewer page."""
     st.header("📖 Document Viewer")
 
-    manager = DatasetManager()
-    datasets = manager.list_datasets()
+    viewer_service = ViewerService()
+    datasets = viewer_service.list_datasets()
 
     if not datasets:
         st.info("No datasets yet. Go to **Datasets** to create one.")
@@ -28,7 +25,7 @@ def render():
             key="viewer_dataset",
         )
 
-    documents = manager.list_documents(selected_ds)
+    documents = viewer_service.list_documents(selected_ds)
     if not documents:
         st.info(f"No documents in **{selected_ds}**. Upload some first.")
         return
@@ -39,10 +36,6 @@ def render():
             documents,
             key="viewer_document",
         )
-
-    file_path = os.path.join(
-        manager.get_dataset_path(selected_ds), selected_doc
-    )
 
     # ---- View mode ----
     view_mode = st.radio(
@@ -56,12 +49,12 @@ def render():
 
     # ---- Load and display ----
     try:
-        doc = load_document(file_path)
+        document = viewer_service.load_document(selected_ds, selected_doc)
     except Exception as e:
         st.error(f"Failed to load document: {e}")
         return
 
-    pages = doc.get("pages")
+    pages = document.pages
 
     if pages:
         # PDF: per-page view
@@ -81,7 +74,7 @@ def render():
                     key="viewer_page",
                 )
 
-        st.caption(f"**{selected_doc}** — {total_pages} pages")
+        st.caption(f"**{document.source}** — {total_pages} pages")
 
         if show_all:
             for p in pages:
@@ -99,8 +92,8 @@ def render():
                 st.warning(f"Page {page_num} has no extractable text.")
     else:
         # Non-PDF: single view
-        st.caption(f"**{selected_doc}**")
-        _display_text(doc["text"], view_mode)
+        st.caption(f"**{document.source}**")
+        _display_text(document.text, view_mode)
 
 
 def _display_text(text: str, mode: str):

@@ -31,6 +31,10 @@ config = get_config()
 
 # Matches a Markdown header line: # Title, ## Subtitle, etc.
 _HEADER_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
+_TABLE_BLOCK_RE = re.compile(
+    r"((?:^\|.*\|\s*$\n?){3,})",
+    re.MULTILINE,
+)
 
 # Splitting separators – most natural boundaries first
 _SEPARATORS = [
@@ -79,6 +83,7 @@ def chunk_document(
             page_text = page_info["text"]
             page_num = page_info["page"]
             raw_chunks = _split_text(page_text, _chunk_size, _chunk_overlap)
+            page_section_path = _extract_header_hierarchy(page_text)
 
             for piece in raw_chunks:
                 piece = piece.strip()
@@ -95,8 +100,18 @@ def chunk_document(
                         "dataset": dataset,
                         "source": source,
                         "page": page_num,
+                        "chunk_type": "content",
                     }
                 )
+
+            table_row_chunks = _extract_table_row_chunks(
+                page_text=page_text,
+                dataset=dataset,
+                source=source,
+                page_num=page_num,
+                section_path=page_section_path,
+            )
+            chunks.extend(table_row_chunks)
     else:
         # Non-PDF: chunk the full text
         raw_chunks = _split_text(text, _chunk_size, _chunk_overlap)
@@ -116,6 +131,7 @@ def chunk_document(
                     "dataset": dataset,
                     "source": source,
                     "page": None,
+                    "chunk_type": "content",
                 }
             )
 
@@ -202,3 +218,96 @@ def _build_context_prefix(
         parts.append(f" | Section: {section_path}")
     parts.append("]")
     return "".join(parts)
+
+
+def _extract_table_row_chunks(
+    page_text: str,
+    dataset: str,
+    source: str,
+    page_num: int,
+    section_path: str,
+) -> List[Dict]:
+    """Create retrieval-friendly chunks from markdown tables.
+
+    Each row becomes a standalone chunk so value lookups can match
+    exact labels and numbers more reliably than large page chunks.
+    """
+    chunks: List[Dict] = []
+    prefix = _build_context_prefix(source, page_num, section_path)
+
+    for table_index, block in enumerate(_TABLE_BLOCK_RE.findall(page_text), 1):
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        if len(lines) < 3 or not _is_markdown_separator(lines[1]):
+            continue
+
+        headers = _parse_markdown_row(lines[0])
+        if not headers:
+            continue
+
+        for row_index, row_line in enumerate(lines[2:], 1):
+            values = _parse_markdown_row(row_line)
+            if not values or all(not value for value in values):
+                continue
+
+            row_text = _format_table_row_text(
+                headers=headers,
+                values=values,
+                table_index=table_index,
+                row_index=row_index,
+            )
+            if not row_text:
+                continue
+
+            chunks.append(
+                {
+                    "chunk_id": str(uuid.uuid4()),
+                    "text": row_text,
+                    "text_to_embed": f"{prefix}\n\n{row_text}",
+                    "dataset": dataset,
+                    "source": source,
+                    "page": page_num,
+                    "chunk_type": "table_row",
+                }
+            )
+
+    return chunks
+
+
+def _is_markdown_separator(line: str) -> bool:
+    """Return whether a markdown table separator line is valid."""
+    cells = _parse_markdown_row(line)
+    if not cells:
+        return False
+    return all(re.fullmatch(r":?-{3,}:?", cell.replace(" ", "")) for cell in cells)
+
+
+def _parse_markdown_row(line: str) -> List[str]:
+    """Split a markdown table row into cells."""
+    stripped = line.strip().strip("|")
+    if not stripped:
+        return []
+    return [cell.strip() for cell in stripped.split("|")]
+
+
+def _format_table_row_text(
+    headers: List[str],
+    values: List[str],
+    table_index: int,
+    row_index: int,
+) -> str:
+    """Turn a table row into a compact text record."""
+    pairs = []
+    for idx, value in enumerate(values):
+        header = headers[idx] if idx < len(headers) and headers[idx] else f"column_{idx + 1}"
+        cleaned_value = value.strip()
+        if not cleaned_value:
+            continue
+        pairs.append(f"{header}: {cleaned_value}")
+
+    if not pairs:
+        return ""
+
+    return (
+        f"Table {table_index}, row {row_index}\n"
+        + "\n".join(pairs)
+    )

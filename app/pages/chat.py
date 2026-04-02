@@ -2,16 +2,18 @@
 
 import streamlit as st
 
-from core.rag_pipeline import RAGPipeline
-from dataset.manager import DatasetManager
+from services.chat_service import ChatService
 
 
 def render():
     """Render the Chat page."""
     st.header("💬 Chat with your documents")
 
-    manager = DatasetManager()
-    datasets = manager.list_datasets()
+    chat_service = ChatService()
+    datasets = chat_service.list_datasets()
+    search_modes = chat_service.get_search_modes()
+    search_mode_labels = {mode.key: mode.label for mode in search_modes}
+    selected = None
 
     # ---- Sidebar: dataset selection + settings ----
     with st.sidebar:
@@ -30,101 +32,108 @@ def render():
         )
 
         st.divider()
-        
-        # Search mode selection
+
         search_mode = st.radio(
             "Search Mode",
-            options=["vector", "page_index", "pdf_raw"],
-            format_func=lambda x: {
-                "vector": "🔍 Vector Search (Hybrid + Reranking)",
-                "page_index": "📑 Page Index (TOC Navigation)",
-                "pdf_raw": "📄 PDF Raw (Direct Page Retrieval)"
-            }[x],
+            options=[mode.key for mode in search_modes],
+            format_func=search_mode_labels.get,
             key="chat_search_mode",
-            help="Vector: Advanced semantic search with BM25 and reranking\n"
-                 "Page Index: Navigate document structure via table of contents\n"
-                 "PDF Raw: Direct page-level retrieval without markdown conversion"
+            help="\n".join(
+                f"{mode.label}: {mode.help_text}" for mode in search_modes
+            ),
         )
-        
+
         st.divider()
-        # Adjust default based on mode to avoid token limits
-        default_k = 3 if search_mode == "pdf_raw" else 5
+        default_k = chat_service.get_search_mode(search_mode).default_top_k
         top_k = st.slider(
-            "Sources to retrieve", 2, 10, default_k, key="chat_top_k",
-            help="PDF Raw mode uses fewer sources by default to avoid token limits"
+            "Sources to retrieve",
+            2,
+            10,
+            default_k,
+            key="chat_top_k",
+            help="Raw PDF mode defaults to fewer sources to limit prompt size.",
         )
 
-    # ---- Session state init ----
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-    if "chat_dataset" not in st.session_state:
-        st.session_state.chat_dataset = selected
-    if "chat_sources" not in st.session_state:
-        st.session_state.chat_sources = {}
-    if "chat_prompts" not in st.session_state:
-        st.session_state.chat_prompts = {}
-
-    # Reset history if dataset changed
-    if st.session_state.chat_dataset != selected:
-        st.session_state.chat_history = []
-        st.session_state.chat_sources = {}
-        st.session_state.chat_prompts = {}
-        st.session_state.chat_dataset = selected
+    state = _get_chat_state(selected)
 
     # ---- Display chat history ----
-    for i, msg in enumerate(st.session_state.chat_history):
+    for i, msg in enumerate(state["history"]):
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
             if msg["role"] == "assistant":
-                if i in st.session_state.chat_sources:
-                    _render_sources(st.session_state.chat_sources[i])
-                if i in st.session_state.chat_prompts:
-                    _render_prompt(st.session_state.chat_prompts[i])
+                if i in state["sources"]:
+                    _render_sources(state["sources"][i])
+                if i in state["prompts"]:
+                    _render_prompt(state["prompts"][i])
 
     # ---- Chat input ----
     user_input = st.chat_input("Ask a question about your documents...")
 
     if user_input:
         # Add user message
-        st.session_state.chat_history.append(
-            {"role": "user", "content": user_input}
-        )
+        state["history"].append({"role": "user", "content": user_input})
         with st.chat_message("user"):
             st.markdown(user_input)
 
         # Generate answer
         with st.chat_message("assistant"):
             with st.spinner("Searching and analyzing..."):
-                pipeline = RAGPipeline()
-                answer, sources, full_prompt = pipeline.query(
-                    user_input, selected, top_k=top_k, mode=search_mode
+                result = chat_service.ask(
+                    user_input,
+                    selected,
+                    top_k=top_k,
+                    mode=search_mode,
                 )
 
-            st.markdown(answer)
+            st.markdown(result["answer"])
 
-            if sources:
-                _render_sources(sources)
-            if full_prompt:
-                _render_prompt(full_prompt)
+            if result["sources"]:
+                _render_sources(result["sources"])
+            if result["prompt"]:
+                _render_prompt(result["prompt"])
 
         # Save to history
-        msg_index = len(st.session_state.chat_history)
-        st.session_state.chat_history.append(
-            {"role": "assistant", "content": answer}
+        msg_index = len(state["history"])
+        state["history"].append(
+            {"role": "assistant", "content": result["answer"]}
         )
-        if sources:
-            st.session_state.chat_sources[msg_index] = sources
-        if full_prompt:
-            st.session_state.chat_prompts[msg_index] = full_prompt
+        if result["sources"]:
+            state["sources"][msg_index] = result["sources"]
+        if result["prompt"]:
+            state["prompts"][msg_index] = result["prompt"]
 
     # ---- Sidebar: clear history ----
     with st.sidebar:
         st.divider()
         if st.button("🗑️ Clear conversation", use_container_width=True):
-            st.session_state.chat_history = []
-            st.session_state.chat_sources = {}
-            st.session_state.chat_prompts = {}
+            state["history"].clear()
+            state["sources"].clear()
+            state["prompts"].clear()
             st.rerun()
+
+
+def _get_chat_state(selected_dataset: str):
+    """Initialize and return chat session state."""
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+    if "chat_dataset" not in st.session_state:
+        st.session_state.chat_dataset = selected_dataset
+    if "chat_sources" not in st.session_state:
+        st.session_state.chat_sources = {}
+    if "chat_prompts" not in st.session_state:
+        st.session_state.chat_prompts = {}
+
+    if st.session_state.chat_dataset != selected_dataset:
+        st.session_state.chat_history = []
+        st.session_state.chat_sources = {}
+        st.session_state.chat_prompts = {}
+        st.session_state.chat_dataset = selected_dataset
+
+    return {
+        "history": st.session_state.chat_history,
+        "sources": st.session_state.chat_sources,
+        "prompts": st.session_state.chat_prompts,
+    }
 
 
 def _render_sources(sources):

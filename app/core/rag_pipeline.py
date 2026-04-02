@@ -69,9 +69,16 @@ Answer:"""
 class RAGPipeline:
     """End-to-end RAG pipeline: ingestion + query."""
 
-    def __init__(self):
+    def __init__(self, llm=None):
         self.manager = DatasetManager()
-        self.llm = GeminiLLM()
+        self._llm = llm
+
+    @property
+    def llm(self):
+        """Lazily initialize the LLM only for query-time operations."""
+        if self._llm is None:
+            self._llm = GeminiLLM()
+        return self._llm
 
     # ------------------------------------------------------------------
     # Ingestion
@@ -176,17 +183,12 @@ class RAGPipeline:
             (answer_text, sources, full_prompt) — the full_prompt is the
             exact text sent to the LLM for transparency.
         """
-        # Choose retriever based on mode
-        if mode == "page_index":
-            retriever = PageIndexRetriever(dataset)
-            sources = retriever.retrieve(question, top_k=top_k or 5)
-        elif mode == "pdf_raw":
-            retriever = PDFRawRetriever(dataset)
-            # Use fewer pages (3) by default to avoid token limits
-            sources = retriever.retrieve(question, top_k=top_k or 3)
-        else:  # default to vector mode
-            retriever = Retriever(dataset, llm=self.llm)
-            sources = retriever.retrieve(question, top_k=top_k)
+        retriever, effective_top_k = self._build_retriever(
+            dataset=dataset,
+            mode=mode,
+            top_k=top_k,
+        )
+        sources = retriever.retrieve(question, top_k=effective_top_k)
 
         if not sources:
             return (
@@ -195,16 +197,7 @@ class RAGPipeline:
                 "",
             )
 
-        # Build context with numbered sources
-        context_parts = []
-        for i, src in enumerate(sources, 1):
-            page_info = (
-                f" (Page {src['page']})" if src.get("page") else ""
-            )
-            context_parts.append(
-                f"### [Source {i}] {src['source']}{page_info}\n\n{src['text']}"
-            )
-        context = "\n\n---\n\n".join(context_parts)
+        context = self._build_context(sources)
 
         prompt = ANSWER_PROMPT.format(context=context, question=question)
         full_prompt = f"**System:** {SYSTEM_PROMPT}\n\n---\n\n{prompt}"
@@ -212,3 +205,27 @@ class RAGPipeline:
         answer = self.llm.generate(prompt, system_prompt=SYSTEM_PROMPT)
 
         return answer, sources, full_prompt
+
+    def _build_retriever(
+        self,
+        dataset: str,
+        mode: str,
+        top_k: Optional[int],
+    ):
+        """Create the retriever matching the requested mode."""
+        if mode == "page_index":
+            return PageIndexRetriever(dataset), top_k or 5
+        if mode == "pdf_raw":
+            return PDFRawRetriever(dataset), top_k or 3
+        return Retriever(dataset, llm=self.llm), top_k
+
+    @staticmethod
+    def _build_context(sources: List[Dict]) -> str:
+        """Format retrieved sources into the prompt context block."""
+        context_parts = []
+        for i, src in enumerate(sources, 1):
+            page_info = f" (Page {src['page']})" if src.get("page") else ""
+            context_parts.append(
+                f"### [Source {i}] {src['source']}{page_info}\n\n{src['text']}"
+            )
+        return "\n\n---\n\n".join(context_parts)

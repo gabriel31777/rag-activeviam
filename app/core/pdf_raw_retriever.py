@@ -41,7 +41,11 @@ class PDFRawRetriever:
         logger.info("Building PDF raw page index for dataset '%s'", self.dataset)
 
         # Get all chunks from vector store
-        all_chunks = self.vector_store.get_all_chunks()
+        all_chunks = [
+            chunk
+            for chunk in self.vector_store.get_all_chunks()
+            if chunk.get("chunk_type", "content") == "content"
+        ]
 
         if not all_chunks:
             logger.warning("No chunks found in dataset '%s'", self.dataset)
