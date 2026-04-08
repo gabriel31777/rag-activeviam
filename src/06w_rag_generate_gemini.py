@@ -69,7 +69,7 @@ class Word2VecEmbeddingFunction:
 # =========================
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-CSV_PATH_DEFAULT = PROJECT_ROOT / "data" / "Data_ret.csv"
+CSV_PATH_DEFAULT = PROJECT_ROOT / "data" / "processed" / "data_ret_clean.csv"
 
 # On Windows, avoid OneDrive for persistent index
 LOCALAPPDATA = os.environ.get("LOCALAPPDATA")

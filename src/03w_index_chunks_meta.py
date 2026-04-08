@@ -69,7 +69,7 @@ class Word2VecEmbeddingFunction:
 # =========================
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-CSV_PATH = PROJECT_ROOT / "data" / "Data_ret.csv"
+CSV_PATH = PROJECT_ROOT / "data" / "processed" / "data_ret_clean.csv"
 
 # Keep path valid on Windows (outside OneDrive to avoid lock issues)
 CHROMA_DIR = Path(os.environ.get("LOCALAPPDATA", ".")) / "rag-activeviam" / "chroma_w2v"

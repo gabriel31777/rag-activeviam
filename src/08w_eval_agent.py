@@ -28,7 +28,7 @@ COLLECTION_DEFAULT = agent_module.COLLECTION_DEFAULT
 MODEL_PATH_DEFAULT = agent_module.MODEL_PATH_DEFAULT
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-CSV_PATH = PROJECT_ROOT / "data" / "Data_ret.csv"
+CSV_PATH = PROJECT_ROOT / "data" / "processed" / "data_ret_clean.csv"
 
 
 def eval_agent(limit: int = 15, model: str = "llama-3.3-70b-versatile", seed: int = None):

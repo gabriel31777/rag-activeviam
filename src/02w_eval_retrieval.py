@@ -62,7 +62,7 @@ class Word2VecEmbeddingFunction:
 # =========================
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-CSV_PATH = PROJECT_ROOT / "data" / "Data_ret.csv"
+CSV_PATH = PROJECT_ROOT / "data" / "processed" / "data_ret_clean.csv"
 
 CHROMA_DIR = Path(os.environ["LOCALAPPDATA"]) / "rag-activiam" / "chroma_w2v"
 COLLECTION_NAME = "data_ret_contexts_v1_w2v"
