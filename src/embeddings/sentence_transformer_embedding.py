@@ -17,14 +17,17 @@ Inconvénient :
 
 from __future__ import annotations
 
-from typing import List
+from typing import Dict, Any, List
+
+import numpy as np
+from chromadb import EmbeddingFunction, Documents, Embeddings
 
 
 # Modèle par défaut — léger et performant
 DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 
-class SentenceTransformerWrapper:
+class SentenceTransformerWrapper(EmbeddingFunction[Documents]):
     """Fonction d'embedding compatible ChromaDB utilisant SentenceTransformers.
 
     Paramètres
@@ -42,21 +45,25 @@ class SentenceTransformerWrapper:
         self._model = SentenceTransformer(model_name)
         self.vector_size: int = self._model.get_sentence_embedding_dimension()
 
-    # -- Interface ChromaDB --------------------------------------------------
-
-    def __call__(self, input: List[str]) -> List[List[float]]:
+    def __call__(self, input: Documents) -> Embeddings:
         """Encode une liste de textes en vecteurs denses."""
         if not input:
             return []
         embeddings = self._model.encode(input, show_progress_bar=False)
-        return [list(row) for row in embeddings]
+        if embeddings.dtype != np.float32:
+            embeddings = embeddings.astype(np.float32)
+        return [embeddings[i] for i in range(embeddings.shape[0])]
 
-    def embed_query(self, input: str) -> List[float]:
-        """Encode une seule requête en vecteur dense."""
-        if isinstance(input, list):
-            return self(input)[0]
-        return self([input])[0]
-
-    def name(self) -> str:
+    @staticmethod
+    def name() -> str:
         """Nom de la fonction d'embedding (pour ChromaDB)."""
-        return f"sentence_transformer_{self.model_name.split('/')[-1]}"
+        return "sentence_transformer_wrapper"
+
+    def get_config(self) -> Dict[str, Any]:
+        """Retourne la configuration pour la sérialisation."""
+        return {"model_name": self.model_name}
+
+    @staticmethod
+    def build_from_config(config: Dict[str, Any]) -> "SentenceTransformerWrapper":
+        """Reconstruit la fonction d'embedding depuis la config."""
+        return SentenceTransformerWrapper(model_name=config["model_name"])

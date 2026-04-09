@@ -62,16 +62,28 @@ def clean_text(text: str) -> str:
 # =========================
 
 def extract_text_from_pdfs(data_dir: Path) -> list[str]:
-    """Extrait le texte de tous les fichiers PDF dans data_dir (récursivement)."""
+    """Extrait le texte de tous les fichiers PDF dans data_dir (récursivement).
+
+    Déduplique par nom de fichier pour éviter de traiter le même PDF
+    présent dans plusieurs sous-répertoires (ex: Dataset-1/ et raw/).
+    """
     texts = []
 
     # Chercher les PDFs dans tous les sous-répertoires
-    pdf_files = sorted(data_dir.rglob("*.pdf"))
-    if not pdf_files:
+    all_pdfs = sorted(data_dir.rglob("*.pdf"))
+    if not all_pdfs:
         print(f"[ATTENTION] Aucun fichier PDF trouvé dans {data_dir}")
         return texts
 
-    print(f"[INFO] {len(pdf_files)} fichiers PDF trouvés")
+    # Dédupliquer par nom de fichier (garder le premier trouvé)
+    seen_names: set[str] = set()
+    pdf_files = []
+    for p in all_pdfs:
+        if p.name not in seen_names:
+            seen_names.add(p.name)
+            pdf_files.append(p)
+
+    print(f"[INFO] {len(pdf_files)} fichiers PDF uniques trouvés ({len(all_pdfs)} au total avec doublons)")
 
     for pdf_path in pdf_files:
         print(f"  Traitement de {pdf_path.name}...")

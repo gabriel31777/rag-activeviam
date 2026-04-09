@@ -19,6 +19,10 @@ import os
 import re
 import sys
 import time
+
+# Forcer UTF-8 sur Windows pour eviter les erreurs d'encodage
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
