@@ -30,7 +30,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CSV_PATH = PROJECT_ROOT / "data" / "processed" / "data_ret_clean.csv"
 
 # Onde o Chroma vai persistir o índice
-CHROMA_DIR = Path(os.environ["LOCALAPPDATA"]) / "rag-activiam" / "chroma"
+CHROMA_DIR = Path(os.environ["LOCALAPPDATA"]) / "rag-activeviam" / "chroma"
 
 # Nome da coleção no Chroma
 COLLECTION_NAME = "data_ret_contexts_v1"

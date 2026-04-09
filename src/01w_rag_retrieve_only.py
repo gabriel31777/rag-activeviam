@@ -1,228 +1,139 @@
 """
-01w_rag_retrieve_only.py (Word2Vec version)
-- Lê o dataset (CSV limpo) com colunas: Question, Context, Value, prompt
-- Cria embeddings do Context (1 doc por linha, por enquanto) usando Word2Vec (TF-IDF + SVD)
-- Indexa no ChromaDB (persistente em ./data/chroma_w2v)
-- Faz uma busca (retrieve) para uma pergunta de teste
+01w_rag_retrieve_only.py (version TF-IDF + SVD)
+Retrieval seul — charge le CSV, l'indexe dans ChromaDB avec l'embedding
+TF-IDF + SVD, puis effectue une requête de test.
+
+Ce script sert de vérification rapide du pipeline de retrieval.
 """
 
 from __future__ import annotations
 
 import os
-import pickle
+import sys
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
+from typing import Any, Dict, List
 
 import pandas as pd
 from tqdm import tqdm
-
 import chromadb
 
-
-# =========================
-# Word2Vec Embedding Function
-# =========================
-
-class Word2VecEmbeddingFunction:
-    """ChromaDB-compatible embedding function using TF-IDF + SVD."""
-    
-    def __init__(self, model_path: str | Path):
-        """Load pre-trained Word2Vec model."""
-        with open(model_path, 'rb') as f:
-            model_data = pickle.load(f)
-        
-        self.vectorizer = model_data['vectorizer']  # TF-IDF vectorizer
-        self.svd = model_data['svd']                 # Truncated SVD reducer
-        self.vector_size = model_data.get('vector_size', 300)
-    
-    def __call__(self, input: List[str]) -> List[List[float]]:
-        """Embed multiple texts."""
-        if not input:
-            return []
-        
-        # Transform texts using TF-IDF
-        tfidf_vecs = self.vectorizer.transform(input)
-        
-        # Reduce dimensionality using SVD
-        embeddings_array = self.svd.transform(tfidf_vecs)
-        
-        # Convert to list of lists
-        embeddings = [list(row) for row in embeddings_array]
-        return embeddings
-    
-    def embed_query(self, input: str) -> List[float]:
-        """Embed a single query."""
-        # Handle both string and list inputs
-        if isinstance(input, list):
-            return self(input)[0]
-        else:
-            return self([input])[0]
-    
-    def name(self) -> str:
-        """Return the name of the embedding function."""
-        return "word2vec_tfidf_svd"
+# Import du module d'embedding partagé
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from embeddings import TfidfSvdEmbeddingFunction
 
 
 # =========================
-# Config (paths e parâmetros)
+# Configuration
 # =========================
 
-# Pasta raiz do projeto = pasta onde está o script (src) -> pai
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-# Ajuste aqui se quiser outro arquivo:
 CSV_PATH = PROJECT_ROOT / "data" / "processed" / "data_ret_clean.csv"
 
-# Onde o Chroma vai persistir o índice (usando palavra-chave 'w2v' para diferenciar)
-CHROMA_DIR = Path(os.environ["LOCALAPPDATA"]) / "rag-activiam" / "chroma_w2v"
-
-# Nome da coleção no Chroma
+CHROMA_DIR = Path(os.environ.get("LOCALAPPDATA", ".")) / "rag-activeviam" / "chroma_w2v"
 COLLECTION_NAME = "data_ret_contexts_v1_w2v"
-
-# Caminho do modelo Word2Vec pré-treinado
 MODEL_PATH = Path(os.environ.get("LOCALAPPDATA", ".")) / "rag-activeviam" / "models" / "word2vec_pdf.pkl"
 
-# Quantos resultados trazer por busca
 TOP_K = 5
-
-# Tamanho do batch de inserção no Chroma
-# (mantemos bem abaixo do limite para evitar erro)
 ADD_BATCH_SIZE = 500
 
 
 # =========================
-# Funções utilitárias
+# Fonctions utilitaires
 # =========================
 
 def load_dataset(csv_path: Path) -> pd.DataFrame:
+    """Charge et valide le CSV du dataset."""
     if not csv_path.exists():
         raise FileNotFoundError(
-            f"Não achei o CSV em: {csv_path}\n"
-            f"Verifique se o arquivo existe e se o caminho está correto."
+            f"CSV introuvable : {csv_path}\n"
+            "Vérifiez que le fichier existe et que le chemin est correct."
         )
 
     df = pd.read_csv(csv_path)
 
-    # Limpeza básica: remover colunas tipo "Unnamed: 0" se existirem
+    # Nettoyage : supprimer les colonnes auto-générées
     for col in list(df.columns):
         if col.lower().startswith("unnamed"):
             df = df.drop(columns=[col])
 
-    # Garantir colunas esperadas
+    # Vérifier les colonnes requises
     required = {"Question", "Context"}
     missing = required - set(df.columns)
     if missing:
-        raise ValueError(f"CSV não tem colunas obrigatórias: {missing}. Colunas atuais: {list(df.columns)}")
+        raise ValueError(
+            f"Le CSV ne contient pas les colonnes requises : {missing}. "
+            f"Colonnes actuelles : {list(df.columns)}"
+        )
 
-    # Remover linhas vazias no Context (por segurança)
+    # Supprimer les lignes avec un Context vide
     df["Context"] = df["Context"].astype(str)
     df = df[df["Context"].str.strip().ne("")].reset_index(drop=True)
 
     return df
 
 
-def make_documents(df: pd.DataFrame) -> Tuple[List[str], List[str], List[Dict[str, Any]]]:
-    """
-    1 documento por linha, usando o campo Context.
-    ids: ctx_000001, ctx_000002, ...
-    metadados: inclui a pergunta original (para debug) e índice
-    """
+def make_documents(df: pd.DataFrame) -> tuple[List[str], List[str], List[Dict[str, Any]]]:
+    """Prépare les documents, IDs et métadonnées pour l'indexation."""
     documents: List[str] = df["Context"].astype(str).tolist()
     ids: List[str] = [f"ctx_{i:06d}" for i in range(len(documents))]
 
-    metadatas: List[Dict[str, Any]] = []
-    if "Question" in df.columns:
-        questions = df["Question"].astype(str).tolist()
-    else:
-        questions = [""] * len(documents)
+    questions = df["Question"].astype(str).tolist() if "Question" in df.columns else [""] * len(documents)
 
-    for i in range(len(documents)):
-        metadatas.append({
-            "row_index": int(i),
-            "question": questions[i],
-        })
+    metadatas: List[Dict[str, Any]] = [
+        {"row_index": int(i), "question": questions[i]}
+        for i in range(len(documents))
+    ]
 
     return documents, ids, metadatas
 
 
-def batched(iterable: List[Any], batch_size: int):
-    """Gera fatias (slices) de uma lista em batches."""
-    for start in range(0, len(iterable), batch_size):
-        end = start + batch_size
-        yield start, end, iterable[start:end]
-
-
-def ensure_dir(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-
-
-def build_or_load_collection(embedding_fn: Word2VecEmbeddingFunction) -> Any:
-    """
-    Cria cliente persistente e coleção.
-    Se já existir, reusa.
-    """
-    ensure_dir(CHROMA_DIR)
+def build_or_load_collection(embedding_fn: TfidfSvdEmbeddingFunction) -> Any:
+    """Crée ou charge la collection ChromaDB."""
+    CHROMA_DIR.mkdir(parents=True, exist_ok=True)
 
     client = chromadb.PersistentClient(path=str(CHROMA_DIR))
-
-    # get_or_create_collection evita erro se já existir
     collection = client.get_or_create_collection(
         name=COLLECTION_NAME,
         embedding_function=embedding_fn,
         metadata={"hnsw:space": "cosine"},
     )
-
     return collection
 
 
-def maybe_reset_collection(collection) -> None:
-    """
-    Se você quiser sempre reconstruir do zero, descomente o conteúdo abaixo.
-    Por padrão, NÃO apagamos nada.
-    """
-    # client = collection._client  # não recomendado mexer internals
-    # client.delete_collection(COLLECTION_NAME)
-    # print("Coleção apagada.")
-
-
-def add_to_collection_in_batches(collection, documents: List[str], ids: List[str], metadatas: List[Dict[str, Any]]) -> None:
-    """
-    Adiciona docs em batches menores para evitar limite interno do Chroma.
-    Também checa se já tem dados (para não duplicar).
-    """
+def add_to_collection_in_batches(
+    collection: Any,
+    documents: List[str],
+    ids: List[str],
+    metadatas: List[Dict[str, Any]],
+) -> None:
+    """Ajoute les documents par batch pour éviter les limites internes de ChromaDB."""
     current_count = collection.count()
     if current_count > 0:
-        print(f"[INFO] Coleção já tem {current_count} itens. Vou pular indexação para evitar duplicatas.")
-        print("       Se quiser reindexar do zero, apague a pasta data/chroma_w2v ou mude COLLECTION_NAME.")
+        print(f"[INFO] La collection contient déjà {current_count} éléments. Indexation ignorée.")
+        print("       Pour ré-indexer, supprimez le dossier chroma_w2v ou changez COLLECTION_NAME.")
         return
 
-    print(f"[INFO] Indexando {len(documents)} documentos em batches de {ADD_BATCH_SIZE}...")
+    print(f"[INFO] Indexation de {len(documents)} documents par batch de {ADD_BATCH_SIZE}...")
 
-    # Vamos iterar por índice para cortar docs/ids/metadatas alinhados
-    for start in tqdm(range(0, len(documents), ADD_BATCH_SIZE)):
+    for start in tqdm(range(0, len(documents), ADD_BATCH_SIZE), desc="Indexation"):
         end = min(start + ADD_BATCH_SIZE, len(documents))
-
-        batch_docs = documents[start:end]
-        batch_ids = ids[start:end]
-        batch_metas = metadatas[start:end]
-
         collection.add(
-            documents=batch_docs,
-            ids=batch_ids,
-            metadatas=batch_metas,
+            documents=documents[start:end],
+            ids=ids[start:end],
+            metadatas=metadatas[start:end],
         )
 
-    print("[INFO] Indexação concluída.")
+    print("[INFO] Indexation terminée.")
 
 
-def retrieve(collection, query: str, top_k: int = TOP_K) -> List[Dict[str, Any]]:
+def retrieve(collection: Any, query: str, top_k: int = TOP_K) -> List[Dict[str, Any]]:
+    """Effectue une recherche vectorielle et retourne les résultats formatés."""
     results = collection.query(
         query_texts=[query],
         n_results=top_k,
         include=["documents", "distances", "metadatas"],
     )
 
-    # results é um dict com listas (1 query -> índice 0)
     docs = results["documents"][0]
     dists = results["distances"][0]
     metas = results["metadatas"][0]
@@ -240,44 +151,45 @@ def retrieve(collection, query: str, top_k: int = TOP_K) -> List[Dict[str, Any]]
 
 
 # =========================
-# Main
+# Point d'entrée
 # =========================
 
 def main():
-    print("[INFO] Projeto:", PROJECT_ROOT)
-    print("[INFO] CSV:", CSV_PATH)
-    print("[INFO] Chroma dir:", CHROMA_DIR)
-    print("[INFO] Model path:", MODEL_PATH)
+    print("[INFO] Projet :", PROJECT_ROOT)
+    print("[INFO] CSV :", CSV_PATH)
+    print("[INFO] Répertoire Chroma :", CHROMA_DIR)
+    print("[INFO] Chemin du modèle :", MODEL_PATH)
 
-    # Load Word2Vec model
+    # Charger le modèle d'embedding
     if not MODEL_PATH.exists():
-        raise FileNotFoundError(f"Word2Vec model not found at {MODEL_PATH}. Run 02c_train_word2vec_pdf.py first.")
-    
-    embedding_fn = Word2VecEmbeddingFunction(MODEL_PATH)
-    print("[INFO] Word2Vec model loaded")
+        raise FileNotFoundError(
+            f"Modèle TF-IDF/SVD introuvable : {MODEL_PATH}. "
+            "Exécutez d'abord 02c_train_word2vec_pdf.py."
+        )
+
+    embedding_fn = TfidfSvdEmbeddingFunction(MODEL_PATH)
+    print("[INFO] Modèle TF-IDF/SVD chargé")
 
     df = load_dataset(CSV_PATH)
-    print(f"[INFO] Dataset carregado: {len(df)} linhas | colunas: {list(df.columns)}")
+    print(f"[INFO] Dataset chargé : {len(df)} lignes | colonnes : {list(df.columns)}")
 
     documents, ids, metadatas = make_documents(df)
-
     collection = build_or_load_collection(embedding_fn)
-
     add_to_collection_in_batches(collection, documents, ids, metadatas)
 
-    print(f"[INFO] Total na coleção agora: {collection.count()}")
+    print(f"[INFO] Total dans la collection : {collection.count()}")
 
-    # Pergunta de teste (você pode trocar)
+    # Requête de test
     test_query = "What is the main financial value mentioned?"
-    print("\n[TEST] Query:", test_query)
+    print(f"\n[TEST] Requête : {test_query}")
 
     hits = retrieve(collection, test_query, top_k=TOP_K)
     for i, h in enumerate(hits, 1):
-        print(f"\n--- Hit {i} ---")
-        print("ID:", h["id"])
-        print("Distance:", h["distance"])
-        print("Metadata:", h["metadata"])
-        print("Doc preview:", h["document_preview"])
+        print(f"\n--- Résultat {i} ---")
+        print("ID :", h["id"])
+        print("Distance :", h["distance"])
+        print("Métadonnées :", h["metadata"])
+        print("Aperçu :", h["document_preview"])
 
 
 if __name__ == "__main__":

@@ -1,11 +1,10 @@
 """
-03w_index_chunks_meta.py (version Word2Vec / TF-IDF + SVD)
-Indexe le dataset CSV dans ChromaDB avec :
-  (a) Découpe en chunks (Context)
-  (b) Métadonnées extraites de la Question (doc + année)
+03s_index_chunks_sentence2vec.py
+Indexe le dataset CSV dans ChromaDB avec l'embedding SentenceTransformers.
 
-La collection est stockée dans un répertoire ChromaDB séparé (chroma_w2v)
-pour ne pas interférer avec la collection SentenceTransformers existante.
+Utilise le modele pre-entraine 'all-MiniLM-L6-v2' (pas besoin d'entrainement).
+La collection est stockee dans un repertoire separe (chroma_st) pour permettre
+la comparaison directe avec la version TF-IDF + SVD (chroma_w2v).
 """
 
 from __future__ import annotations
@@ -20,9 +19,9 @@ import pandas as pd
 from tqdm import tqdm
 import chromadb
 
-# Ajouter le répertoire parent pour l'import du module embeddings
+# Import du module d'embedding partage
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from embeddings import TfidfSvdEmbeddingFunction
+from embeddings import SentenceTransformerWrapper
 
 
 # =========================
@@ -32,22 +31,24 @@ from embeddings import TfidfSvdEmbeddingFunction
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CSV_PATH = PROJECT_ROOT / "data" / "processed" / "data_ret_clean.csv"
 
-# Répertoire ChromaDB (séparé pour w2v)
-CHROMA_DIR = Path(os.environ.get("LOCALAPPDATA", ".")) / "rag-activeviam" / "chroma_w2v"
+# Repertoire ChromaDB separe pour SentenceTransformers
+CHROMA_DIR = Path(os.environ.get("LOCALAPPDATA", ".")) / "rag-activeviam" / "chroma_st"
 
-COLLECTION_NAME = "data_ret_v3_full_w2v"
-MODEL_PATH = Path(os.environ.get("LOCALAPPDATA", ".")) / "rag-activeviam" / "models" / "word2vec_pdf.pkl"
+COLLECTION_NAME = "data_ret_v3_full_st"
 
-# Paramètres de découpe
+# Modele SentenceTransformers (pre-entraine, pas d'entrainement local)
+EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+
+# Parametres de decoupage
 CHUNK_SIZE = 2000
 CHUNK_OVERLAP = 300
 
-# Taille du batch d'insertion dans ChromaDB
+# Taille du batch d'insertion
 ADD_BATCH_SIZE = 500
 
 
 # =========================
-# Expressions régulières
+# Expressions regulieres
 # =========================
 
 DOC_YEAR_RE = re.compile(r"in\s+(.+?)\s+document\s+in\s+(\d{4})\??$", re.IGNORECASE)
@@ -58,7 +59,7 @@ DOC_YEAR_RE = re.compile(r"in\s+(.+?)\s+document\s+in\s+(\d{4})\??$", re.IGNOREC
 # =========================
 
 def parse_doc_year(question: str) -> Tuple[Optional[str], Optional[int]]:
-    """Extrait le nom du document et l'année depuis la question."""
+    """Extrait le nom du document et l'annee depuis la question."""
     q = (question or "").strip()
     m = DOC_YEAR_RE.search(q)
     if not m:
@@ -69,7 +70,7 @@ def parse_doc_year(question: str) -> Tuple[Optional[str], Optional[int]]:
 
 
 def chunk_text(text: str, size: int, overlap: int) -> List[str]:
-    """Découpe un texte long en chunks avec chevauchement."""
+    """Decoupe un texte long en chunks avec chevauchement."""
     t = (text or "").strip()
     if not t:
         return []
@@ -102,12 +103,12 @@ def load_df(path: Path) -> pd.DataFrame:
 
 
 def build_collection() -> Any:
-    """Crée ou charge la collection ChromaDB avec l'embedding TF-IDF + SVD."""
+    """Cree ou charge la collection ChromaDB avec SentenceTransformers."""
     if not CHROMA_DIR.exists():
         CHROMA_DIR.mkdir(parents=True, exist_ok=True)
 
     client = chromadb.PersistentClient(path=str(CHROMA_DIR))
-    embedding_fn = TfidfSvdEmbeddingFunction(MODEL_PATH)
+    embedding_fn = SentenceTransformerWrapper(model_name=EMBEDDING_MODEL)
 
     collection = client.get_or_create_collection(
         name=COLLECTION_NAME,
@@ -118,28 +119,22 @@ def build_collection() -> Any:
 
 
 # =========================
-# Point d'entrée
+# Point d'entree
 # =========================
 
 def main():
     print("[INFO] CSV :", CSV_PATH)
-    print("[INFO] Répertoire Chroma :", CHROMA_DIR)
+    print("[INFO] Repertoire Chroma :", CHROMA_DIR)
     print("[INFO] Collection :", COLLECTION_NAME)
-    print("[INFO] Chemin du modèle :", MODEL_PATH)
-
-    if not MODEL_PATH.exists():
-        raise FileNotFoundError(
-            f"Modèle TF-IDF/SVD introuvable : {MODEL_PATH}. "
-            "Exécutez d'abord 02c_train_word2vec_pdf.py."
-        )
+    print("[INFO] Modele d'embedding :", EMBEDDING_MODEL)
 
     df = load_df(CSV_PATH)
     collection = build_collection()
 
-    # Éviter les doublons si la collection existe déjà
+    # Eviter les doublons
     if collection.count() > 0:
-        print(f"[INFO] La collection contient déjà {collection.count()} éléments.")
-        print("       Pour ré-indexer : changez COLLECTION_NAME ou supprimez le dossier chroma_w2v.")
+        print(f"[INFO] La collection contient deja {collection.count()} elements.")
+        print("       Pour re-indexer : changez COLLECTION_NAME ou supprimez le dossier chroma_st.")
         return
 
     docs: List[str] = []
@@ -152,8 +147,7 @@ def main():
         value = str(row.get("Value", "")).strip()
         doc, year = parse_doc_year(question)
 
-        # Document synthétique : on préfixe le contexte avec la question et la valeur
-        # pour garantir que chaque ligne soit retrouvable par le nom de la métrique
+        # Document synthetique avec question + valeur + contexte
         full_text = f"QUESTION: {question}\nVALUE: {value}\n\nCONTEXT:\n{context}"
 
         chunks = chunk_text(full_text, CHUNK_SIZE, CHUNK_OVERLAP)
@@ -171,9 +165,9 @@ def main():
                 }
             )
 
-    print(f"[INFO] Nombre total de chunks à indexer : {len(docs)} (depuis {len(df)} lignes)")
+    print(f"[INFO] Nombre total de chunks a indexer : {len(docs)} (depuis {len(df)} lignes)")
 
-    for start in tqdm(range(0, len(docs), ADD_BATCH_SIZE), desc="Indexation"):
+    for start in tqdm(range(0, len(docs), ADD_BATCH_SIZE), desc="Indexation ST"):
         end = min(start + ADD_BATCH_SIZE, len(docs))
         collection.add(
             documents=docs[start:end],
@@ -181,7 +175,7 @@ def main():
             metadatas=metas[start:end],
         )
 
-    print("[INFO] Indexation terminée.")
+    print("[INFO] Indexation terminee.")
     print(f"[INFO] Total dans la collection : {collection.count()}")
 
 

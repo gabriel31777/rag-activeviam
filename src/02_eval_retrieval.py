@@ -25,7 +25,7 @@ from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunct
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CSV_PATH = PROJECT_ROOT / "data" / "processed" / "data_ret_clean.csv"
 
-CHROMA_DIR = Path(os.environ["LOCALAPPDATA"]) / "rag-activiam" / "chroma"
+CHROMA_DIR = Path(os.environ["LOCALAPPDATA"]) / "rag-activeviam" / "chroma"
 COLLECTION_NAME = "data_ret_contexts_v1"
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 

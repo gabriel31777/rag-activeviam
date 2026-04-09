@@ -1,8 +1,8 @@
 """
 08_eval_agent.py
-- Evaluates the accuracy of the Agent on the ActiveViam dataset.
-- Picks RANDOM questions (with optional seed for reproducibility).
-- Shows ALL questions with answers, marking ✅ or ❌.
+Evalue la precision de l'agent RAG sur le dataset ActiveViam.
+- Selectionne des questions aleatoires (avec graine optionnelle).
+- Affiche chaque question avec la reponse, marquee [OK] ou [ERREUR].
 """
 
 from __future__ import annotations
@@ -78,7 +78,7 @@ def eval_agent(limit: int = 15, model: str = "llama-3.3-70b-versatile", seed: in
         if ok:
             hits += 1
 
-        status = "✅" if ok else "❌"
+        status = "[OK]" if ok else "[ERREUR]"
         print(f"  {status} [{i+1}/{total}] Q: {q}")
         print(f"       Gold: {gold}  |  Agent: {agent_answer}  (Searches: {n_searches})")
         print()

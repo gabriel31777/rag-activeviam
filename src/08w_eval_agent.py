@@ -1,8 +1,10 @@
 """
-08w_eval_agent.py (Word2Vec version)
-- Evaluates the accuracy of the Agent on the ActiveViam dataset.
-- Picks RANDOM questions (with optional seed for reproducibility).
-- Shows ALL questions with answers, marking ✅ or ❌.
+08w_eval_agent.py (version TF-IDF + SVD)
+Evalue la precision de l'agent RAG sur le dataset ActiveViam.
+
+- Selectionne des questions ALEATOIRES (avec graine optionnelle pour reproductibilite)
+- Affiche chaque question avec la reponse de l'agent et le resultat [OK] ou [ERREUR]
+- Calcule le taux de precision global
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ import importlib
 
 sys.path.append(str(Path(__file__).parent))
 
+# Import dynamique des modules necessaires
 eval_v2 = importlib.import_module("04w_eval_retrieval_v2")
 value_matches = eval_v2.value_matches
 
@@ -32,37 +35,41 @@ CSV_PATH = PROJECT_ROOT / "data" / "processed" / "data_ret_clean.csv"
 
 
 def eval_agent(limit: int = 15, model: str = "llama-3.3-70b-versatile", seed: int = None):
-    print(f"[INFO] Initializing RAG database...")
+    """Evalue l'agent sur un echantillon aleatoire du dataset."""
+    print("[INFO] Initialisation de la base RAG...")
     init_collection(Path(CHROMA_DIR_DEFAULT), COLLECTION_DEFAULT, Path(MODEL_PATH_DEFAULT))
 
-    print(f"[INFO] Loading questions from {CSV_PATH}...")
+    print(f"[INFO] Chargement des questions depuis {CSV_PATH}...")
     df = pd.read_csv(CSV_PATH)
 
     for col in list(df.columns):
         if col.lower().startswith("unnamed"):
             df = df.drop(columns=[col])
 
-    # Drop questions whose gold answer is 0 — they add no signal for retrieval quality
+    # Filtrer les questions dont la valeur attendue est 0 (pas de signal utile)
     before = len(df)
-    df = df[df["Value"].astype(str).str.strip().apply(
-        lambda v: v not in ("0", "0.0", "0.00")
-    )].reset_index(drop=True)
-    print(f"[INFO] Filtered out {before - len(df)} zero-value questions ({len(df)} remaining).")
+    df = df[
+        df["Value"]
+        .astype(str)
+        .str.strip()
+        .apply(lambda v: v not in ("0", "0.0", "0.00"))
+    ].reset_index(drop=True)
+    print(f"[INFO] {before - len(df)} questions a valeur zero filtrees ({len(df)} restantes).")
 
-    # Random sampling (from the filtered pool)
+    # Echantillonnage aleatoire
     if seed is not None:
-        print(f"[INFO] Using seed: {seed}")
+        print(f"[INFO] Graine utilisee : {seed}")
     else:
         import random
         seed = random.randint(0, 99999)
-        print(f"[INFO] Random seed (use --seed {seed} to reproduce): {seed}")
+        print(f"[INFO] Graine aleatoire (pour reproduire : --seed {seed}) : {seed}")
 
     df_eval = df.sample(n=min(limit, len(df)), random_state=seed).reset_index(drop=True)
 
     hits = 0
     total = len(df_eval)
 
-    print(f"[INFO] Testing {total} samples using {model}...\n")
+    print(f"[INFO] Test de {total} echantillons avec le modele {model}...\n")
 
     for i, row in df_eval.iterrows():
         q = str(row["Question"])
@@ -71,33 +78,34 @@ def eval_agent(limit: int = 15, model: str = "llama-3.3-70b-versatile", seed: in
         try:
             agent_answer, n_searches = run_agent(q, model_name=model, temperature=0.1, answer_style="value")
         except Exception as e:
-            agent_answer = f"API ERROR: {str(e)}"
+            agent_answer = f"ERREUR API : {str(e)}"
             n_searches = 0
 
         ok = value_matches(gold, agent_answer)
         if ok:
             hits += 1
 
-        status = "✅" if ok else "❌"
-        print(f"  {status} [{i+1}/{total}] Q: {q}")
-        print(f"       Gold: {gold}  |  Agent: {agent_answer}  (Searches: {n_searches})")
+        status = "[OK]" if ok else "[ERREUR]"
+        print(f"  {status} [{i+1}/{total}] Q : {q}")
+        print(f"       Attendu : {gold}  |  Agent : {agent_answer}  (Recherches : {n_searches})")
         print()
 
+        # Pause pour eviter le rate limiting
         time.sleep(30)
 
     rate = hits / total if total > 0 else 0
     print("=" * 60)
-    print(f"  RESULTS — ActiveViam Dataset")
-    print(f"  Model: {model}  |  Seed: {seed}")
-    print(f"  Hits: {hits}/{total}  |  Accuracy: {rate * 100:.1f}%")
+    print(f"  RESULTATS -- Dataset ActiveViam")
+    print(f"  Modele : {model}  |  Graine : {seed}")
+    print(f"  Reussis : {hits}/{total}  |  Precision : {rate * 100:.1f}%")
     print("=" * 60)
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--limit", type=int, default=15)
-    ap.add_argument("--model", default="llama-3.3-70b-versatile")
-    ap.add_argument("--seed", type=int, default=None, help="Seed for reproducibility.")
+    ap = argparse.ArgumentParser(description="Evaluation de l'agent RAG")
+    ap.add_argument("--limit", type=int, default=15, help="Nombre de questions a tester")
+    ap.add_argument("--model", default="llama-3.3-70b-versatile", help="Modele LLM a utiliser")
+    ap.add_argument("--seed", type=int, default=None, help="Graine pour reproductibilite")
     args = ap.parse_args()
 
     eval_agent(limit=args.limit, model=args.model, seed=args.seed)
