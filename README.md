@@ -1,91 +1,92 @@
-# RAG Activeviam Project - AI Financial Report Analysis
+# RAG Activeviam — Extraction de Données Financières par IA
 
-This project implements a high-fidelity RAG (Retrieval-Augmented Generation) system to extract data from raw PDF financial and sustainability reports. It uses **ChromaDB** for storage, **PyMuPDF** for table-aware PDF parsing, and an agentic loop (Groq/Gemini) to navigate complex financial data.
+Système RAG (Retrieval-Augmented Generation) pour extraire des données financières à partir de rapports PDF bruts. Utilise **ChromaDB** pour le stockage vectoriel, **PyMuPDF** pour l'extraction de texte/tableaux, et un agent LLM (Groq/Gemini) avec fallback automatique.
 
-## ⚠️ Prerequisites
+## Prérequis
 
-1.  **Python 3.10 or higher** installed.
-2.  **API Keys**: You need keys from Groq and/or Google Gemini.
-    *   **Groq (Primary)**: [Groq Console](https://console.groq.com/keys)
-    *   **Gemini (Fallback)**: [Google AI Studio](https://aistudio.google.com/app/apikey)
+- **Python 3.10+**
+- **API Keys** :
+  - [Groq](https://console.groq.com/keys) (primaire)
+  - [Google Gemini](https://aistudio.google.com/app/apikey) (fallback)
 
----
+## Installation
 
-## 🚀 Installation and Setup
-
-### 1. Configure the API Keys
-For security reasons, do **not** commit your API keys. 
-1.  Copy `.env.example` to a new file named `.env`:
-    ```bash
-    cp .env.example .env
-    ```
-2.  Open `.env` and fill in your keys:
-    ```env
-    GROQ_API_KEY=your_groq_key_here
-    GEMINI_API_KEY=your_gemini_key_here
-    ```
-
-### 2. Create Virtual Environment
-Open your terminal in the project folder and run:
-
-**Windows:**
-```powershell
+```bash
+# 1. Créer l'environnement virtuel
 python -m venv .venv
-.\.venv\Scripts\activate
-```
+.\.venv\Scripts\activate       # Windows
+# source .venv/bin/activate    # Mac/Linux
 
-**Mac/Linux:**
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
+# 2. Configurer les clés API
+cp .env.example .env           # puis remplir les clés
 
-### 3. Install Dependencies
-```bash
+# 3. Installer les dépendances
 pip install -r requirements.txt
 ```
 
----
+## Embeddings Disponibles
 
-## ⚙️ PDF Indexing (The Database)
+| Méthode              | Flag                    | Description                         |
+|----------------------|-------------------------|-------------------------------------|
+| TF-IDF + SVD         | `--embedding tfidf_svd` | Rapide, algébrique                  |
+| Word2Vec (gensim)    | `--embedding word2vec`  | Réseau de neurones sur le corpus    |
+| SentenceTransformers | `--embedding sentence_transformer` | Modèle pré-entraîné, haute qualité |
 
-We index raw PDF documents from `data/raw/Structured data/`. To rebuild the database from scratch:
+## Pipeline d'Exécution
 
+### Étape 1 : Entraîner les modèles locaux (TF-IDF+SVD et Word2Vec)
 ```bash
-python src/12_index_pdfs_full.py
+python src/01_train_embeddings.py
 ```
-*This uses PyMuPDF to extract text while preserving table structures and maps them into the `activeviam_pdfs_v1` collection.*
+> Entraîne les deux modèles à partir des PDFs dans `data/raw/Structured data/`.
+> SentenceTransformers n'a pas besoin d'entraînement (modèle pré-entraîné).
 
----
+### Étape 2 : Indexer les PDFs dans ChromaDB
+```bash
+python src/02_index_pdfs.py --embedding tfidf_svd --force
+python src/02_index_pdfs.py --embedding word2vec --force
+python src/02_index_pdfs.py --embedding sentence_transformer --force
+```
 
-## 🤖 How to Use
+### Étape 3 : Évaluer le retrieval (Hit@K, sans API)
+```bash
+python src/03_eval_retrieval.py --embedding tfidf_svd
+python src/03_eval_retrieval.py --embedding word2vec
+python src/03_eval_retrieval.py --embedding sentence_transformer
+```
 
-### 1. Web Interface (The Dashboard)
-The easiest way to use the system is via the web app:
+### Étape 4 : Évaluer l'agent end-to-end (utilise API Groq/Gemini)
+```bash
+python src/05_eval_agent.py --embedding tfidf_svd --limit 20
+python src/05_eval_agent.py --embedding word2vec --limit 20
+python src/05_eval_agent.py --embedding sentence_transformer --limit 20
+```
+
+### Interface Web
 ```bash
 python app.py
+# Ouvrir http://127.0.0.1:5000
 ```
-Then open `http://127.0.0.1:5000` in your browser.
 
-### 2. Accuracy Evaluation (Benchmark)
-To test the agent's performance against the gold dataset (excluding zero-value responses):
-```bash
-python src/08_eval_agent.py --limit 10
+## Structure des Scripts
+
 ```
-*Note: The script includes a 30-second delay between questions to respect API rate limits.*
+src/
+├── embeddings/                     # Module d'embedding
+│   ├── tfidf_svd_embedding.py      # TF-IDF + SVD
+│   ├── word2vec_embedding.py       # Word2Vec (gensim)
+│   ├── sentence_transformer_embedding.py  # SentenceTransformers
+│   └── embedding_factory.py        # Factory
+├── 01_train_embeddings.py          # Entraîne TF-IDF+SVD et Word2Vec
+├── 02_index_pdfs.py                # Indexe les PDFs dans ChromaDB
+├── 03_eval_retrieval.py            # Évalue le retrieval (Hit@K)
+├── 04_rag_agent.py                 # Agent RAG (Groq/Gemini)
+└── 05_eval_agent.py                # Évaluation end-to-end
+app.py                              # Interface web Flask
+```
 
----
+## Données
 
-## 🛠️ Key Scripts
-
-*   `src/09_rag_agent_groq.py`: The core agent logic. It manages the thinking loop, tool calls, and API fallbacks.
-*   `src/12_index_pdfs_full.py`: The PDF indexer. Use this when you add new PDF files to the data folder.
-*   `src/08_eval_agent.py`: Automated evaluation script to measure accuracy.
-*   `app.py`: Flask server for the UI.
-
-## 📂 File Structure
-
-*   `data/raw/Structured data/`: Put your PDF reports here.
-*   `.env`: Your private API keys (ignored by Git).
-*   `.env.example`: Template for environment variables.
-*   `chroma/`: Local vector database storage.
+- `data/raw/Structured data/` : PDFs des rapports (source unique)
+- `data/processed/data_ret_clean.csv` : Gabarito (questions + réponses attendues, pour évaluation uniquement)
+- `.env` : Clés API (ignoré par Git)
