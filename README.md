@@ -31,6 +31,7 @@ pip install -r requirements.txt
 | TF-IDF + SVD         | `--embedding tfidf_svd` | Rapide, algébrique                  |
 | Word2Vec (gensim)    | `--embedding word2vec`  | Réseau de neurones sur le corpus    |
 | SentenceTransformers | `--embedding sentence_transformer` | Modèle pré-entraîné, haute qualité |
+| Hybrid (RRF)         | `--embedding hybrid`    | Combine TF-IDF + SentenceTransformers |
 
 ## Pipeline d'Exécution
 
@@ -53,6 +54,7 @@ python src/02_index_pdfs.py --embedding sentence_transformer --force
 python src/03_eval_retrieval.py --embedding tfidf_svd
 python src/03_eval_retrieval.py --embedding word2vec
 python src/03_eval_retrieval.py --embedding sentence_transformer
+python src/03_eval_retrieval.py --embedding hybrid
 ```
 
 ### Étape 4 : Évaluer l'agent end-to-end (utilise API Groq/Gemini)
@@ -60,6 +62,7 @@ python src/03_eval_retrieval.py --embedding sentence_transformer
 python src/05_eval_agent.py --embedding tfidf_svd --limit 20
 python src/05_eval_agent.py --embedding word2vec --limit 20
 python src/05_eval_agent.py --embedding sentence_transformer --limit 20
+python src/05_eval_agent.py --embedding hybrid --limit 20
 ```
 
 ### Interface Web
