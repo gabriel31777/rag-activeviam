@@ -195,6 +195,16 @@
 
     <div class="controls">
         <div class="options">
+            <span style="font-size: 0.85rem; color: #64748b; align-self: center;">Embedding :</span>
+            <div class="radio-group" style="margin-right: 15px; background: transparent; padding: 0;">
+                <select id="embedding-select" style="padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); color: #64748b; font-size: 0.85rem; outline: none; background: white; cursor: pointer;">
+                    <option value="hybrid" selected>Hybrid (Meilleur)</option>
+                    <option value="tfidf_svd">TF-IDF + SVD</option>
+                    <option value="sentence_transformer">SentenceTransformers</option>
+                    <option value="word2vec">Word2Vec</option>
+                </select>
+            </div>
+
             <span style="font-size: 0.85rem; color: #64748b; align-self: center;">Style de réponse :</span>
             <div class="radio-group">
                 <input type="radio" id="style-value" name="style" value="value">
@@ -231,6 +241,7 @@
 
         // Get the selected style
         const style = document.querySelector('input[name="style"]:checked').value;
+        const embedding = document.getElementById('embedding-select').value;
 
         // Add user message
         addMessage(question, 'user');
@@ -246,7 +257,7 @@
             const response = await fetch('/ask', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question: question, style: style })
+                body: JSON.stringify({ question: question, style: style, embedding: embedding })
             });
 
             const data = await response.json();

@@ -277,8 +277,9 @@ def run_agent(
         "Associez l'année demandée à la bonne colonne SOIGNEUSEMENT.\n"
         "6. Les rapports peuvent contenir des données historiques pour plusieurs années.\n"
         "7. Si vous voyez la métrique mais ne pouvez pas identifier la colonne, donnez votre meilleure estimation.\n"
-        "8. Pour les sommes (ex: 'Total Scope 1 et 2'), cherchez chaque composante et calculez la somme.\n"
-        f"9. {behavior_instr}"
+        "8. Si vous n'arrivez vraiment pas à trouver l'information dans les fichiers (même après recherche), PUIS vous pouvez utiliser vos connaissances générales pour répondre. Mais dans ce cas, vous DEVEZ OBLIGATOIREMENT commencer votre réponse par : 'Non trouvé dans les fichiers : '.\n"
+        "9. Pour les sommes (ex: 'Total Scope 1 et 2'), cherchez chaque composante et calculez la somme.\n"
+        f"10. {behavior_instr}"
     )
 
     messages = [
@@ -338,10 +339,17 @@ def run_agent(
                 target_model = models_queue[0]
                 provider, actual_model_name = target_model.split(":", 1)
 
+                if _DEBUG_MODE:
+                    sys.stdout.write(f"  -> Tentative du modèle: {target_model}... ")
+                    sys.stdout.flush()
+
                 if provider == "groq":
                     client = Groq(api_key=groq_api_key, max_retries=0)
                 else:
                     if not gemini_api_key:
+                        if _DEBUG_MODE:
+                            sys.stdout.write("Ignoré (pas de clé Gemini API)\n")
+                            sys.stdout.flush()
                         models_queue.pop(0)
                         continue
                     client = openai.OpenAI(
@@ -358,26 +366,27 @@ def run_agent(
                         tool_choice="auto",
                         temperature=temperature,
                     )
+                    if _DEBUG_MODE:
+                        sys.stdout.write("OK\n")
+                        sys.stdout.flush()
                     last_client = client
                     last_model_name = actual_model_name
                     break
                 except Exception as e:
-                    failed_model = models_queue.pop(0)
+                    last_err = str(e)
+                    models_queue.pop(0)
+                    err_msg = last_err.split('\n')[0][:80]
                     if _DEBUG_MODE:
-                        err_msg = str(e).split('\n')[0][:100]
-                        print(f"\n[ATTENTION] {failed_model} en échec ({err_msg}...). Bascule...")
-                    time.sleep(2)
+                        sys.stdout.write(f"Échec ({err_msg}...)\n")
+                        sys.stdout.flush()
                     
             if response is not None:
                 break
                 
             if _DEBUG_MODE:
-                print("\n[ATTENTION] Tous les modèles sont épuisés (Rate limits, etc.). Attente de 60s avant de tout réessayer...")
-            else:
-                sys.stdout.write("\n[ATTENTION] Limite d'API atteinte. Attente de 60s...\n")
-                sys.stdout.flush()
-                
-            time.sleep(60)
+                print(f"\n[ATTENTION] Tous les modèles sont épuisés (Dernière erreur : {last_err}). Interruption pour l'interface web.")
+            
+            return f"❌ Erreur : Tous les modèles de l'IA sont surchargés (API Rate Limit). Veuillez réessayer dans quelques secondes. (Détail: {last_err[:50]})", num_searches
 
         response_message = response.choices[0].message
         tool_calls = response_message.tool_calls

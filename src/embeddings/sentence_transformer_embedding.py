@@ -26,7 +26,6 @@ from chromadb import EmbeddingFunction, Documents, Embeddings
 # Modèle par défaut — léger et performant
 DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
-
 class SentenceTransformerWrapper(EmbeddingFunction[Documents]):
     """Fonction d'embedding compatible ChromaDB utilisant SentenceTransformers.
 

@@ -15,13 +15,15 @@ def ask():
     data = request.json
     question = data.get('question')
     style = data.get('style')  # 'value' ou 'free'
+    embedding = data.get('embedding', 'hybrid')
 
     command = [
         sys.executable,
         "src/04_rag_agent.py",
         "--q", question,
         "--mode", "chat",
-        "--answer-style", style
+        "--answer-style", style,
+        "--embedding", embedding
     ]
 
     print("\n" + "="*50)
