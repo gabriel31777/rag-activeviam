@@ -1,13 +1,7 @@
 """
 01_train_embeddings.py
-Entraîne les modèles d'embedding locaux à partir des PDFs.
-
-Deux modèles sont entraînés :
-  1. TF-IDF + TruncatedSVD  ->  tfidf_svd_model.pkl
-  2. Word2Vec (gensim)      ->  word2vec_model.pkl
-
-Les modèles sont sauvegardés dans :
-    %LOCALAPPDATA%/rag-activeviam/models/
+Entraine les modeles d'embedding locaux (TF-IDF+SVD et Word2Vec).
+Sortie dans %LOCALAPPDATA%/rag-activeviam/models/
 
 Utilisation :
     python src/01_train_embeddings.py
@@ -40,7 +34,7 @@ MODELS_DIR = Path(os.environ.get("LOCALAPPDATA", ".")) / "rag-activeviam" / "mod
 SVD_DIM = 300
 W2V_DIM = 300
 
-# Nettoyage de texte
+# Regex de nettoyage
 _PRIVATE_USE_RE = re.compile(r"[\uf000-\uf0ff]")
 _FANCY_QUOTES = {
     "\u2018": "'", "\u2019": "'",
@@ -48,12 +42,10 @@ _FANCY_QUOTES = {
 }
 
 
-# =========================
 # Extraction de texte
-# =========================
 
 def clean_text(text: str) -> str:
-    """Nettoie un texte extrait de PDF."""
+    """Nettoyage basique d'un texte PDF."""
     if not text:
         return ""
     text = _PRIVATE_USE_RE.sub("", text)
@@ -63,10 +55,7 @@ def clean_text(text: str) -> str:
 
 
 def extract_pages_from_pdfs(pdf_dir: Path) -> List[str]:
-    """Extrait le texte de chaque page de chaque PDF (via PyMuPDF).
-
-    Retourne une liste de textes (un par page).
-    """
+    """Extrait le texte page par page de chaque PDF."""
     pages: List[str] = []
     pdf_files = sorted(pdf_dir.glob("*.pdf"))
 
@@ -95,22 +84,20 @@ def extract_pages_from_pdfs(pdf_dir: Path) -> List[str]:
                     pages.append(clean_text(text))
             doc.close()
         except Exception as e:
-            print(f"    [ERREUR] Échec de lecture de {pdf_path.name}: {e}")
+            print(f"    [ERREUR] Echec de lecture de {pdf_path.name}: {e}")
 
     print(f"[INFO] {len(pages)} pages extraites")
     return pages
 
 
-# =========================
-# Entraînement TF-IDF + SVD
-# =========================
+# Entrainement TF-IDF + SVD
 
 def train_tfidf_svd(pages: List[str]) -> None:
-    """Entraîne un modèle TF-IDF + SVD et le sauvegarde."""
+    """Entraine et sauvegarde le modele TF-IDF + SVD."""
     output_path = MODELS_DIR / "tfidf_svd_model.pkl"
 
     print(f"\n{'='*60}")
-    print("Entraînement TF-IDF + SVD")
+    print("Entrainement TF-IDF + SVD")
     print(f"{'='*60}")
 
     vectorizer = TfidfVectorizer(
@@ -118,7 +105,7 @@ def train_tfidf_svd(pages: List[str]) -> None:
         min_df=1,
         max_df=0.9,
         stop_words="english",
-        sublinear_tf=True,  # Applique log(1 + tf) pour mieux capter les termes rares
+        sublinear_tf=True,
     )
     tfidf_matrix = vectorizer.fit_transform(pages)
     print(f"[INFO] Matrice TF-IDF : {tfidf_matrix.shape}")
@@ -136,28 +123,26 @@ def train_tfidf_svd(pages: List[str]) -> None:
     with open(output_path, "wb") as f:
         pickle.dump(model_data, f)
 
-    print(f"[OK] Modèle sauvegardé : {output_path}")
+    print(f"[OK] Modele sauvegarde : {output_path}")
 
 
-# =========================
-# Entraînement Word2Vec
-# =========================
+# Entrainement Word2Vec
 
 def train_word2vec(pages: List[str]) -> None:
-    """Entraîne un vrai modèle Word2Vec (gensim) et le sauvegarde."""
+    """Entraine et sauvegarde le modele Word2Vec (gensim)."""
     from gensim.models import Word2Vec
 
     output_path = MODELS_DIR / "word2vec_model.pkl"
 
     print(f"\n{'='*60}")
-    print("Entraînement Word2Vec (gensim)")
+    print("Entrainement Word2Vec (gensim)")
     print(f"{'='*60}")
 
-    # Tokeniser chaque page en liste de mots
+    # Tokenisation
     sentences = [page.lower().split() for page in pages]
     print(f"[INFO] {len(sentences)} documents, {sum(len(s) for s in sentences)} tokens")
 
-    # Entraîner Word2Vec
+
     w2v_model = Word2Vec(
         sentences=sentences,
         vector_size=W2V_DIM,
@@ -165,11 +150,11 @@ def train_word2vec(pages: List[str]) -> None:
         min_count=2,
         workers=4,
         epochs=20,
-        sg=1,  # Skip-gram (meilleur pour petits corpus)
+        sg=1,  # Skip-gram
     )
     print(f"[INFO] Vocabulaire Word2Vec : {len(w2v_model.wv)} mots")
 
-    # Entraîner aussi un TF-IDF pour les poids de la moyenne pondérée
+    # TF-IDF pour la moyenne ponderee
     vectorizer = TfidfVectorizer(
         max_features=10000,
         min_df=1,
@@ -186,31 +171,29 @@ def train_word2vec(pages: List[str]) -> None:
     with open(output_path, "wb") as f:
         pickle.dump(model_data, f)
 
-    print(f"[OK] Modèle sauvegardé : {output_path}")
+    print(f"[OK] Modele sauvegarde : {output_path}")
 
 
-# =========================
-# Point d'entrée
-# =========================
+# Main
 
 def main():
-    ap = argparse.ArgumentParser(description="Entraîner les modèles d'embedding")
+    ap = argparse.ArgumentParser(description="Entrainement des modeles d'embedding")
     ap.add_argument(
         "--only", choices=["tfidf_svd", "word2vec"],
-        default=None, help="Entraîner un seul type de modèle",
+        default=None, help="Entrainer un seul type de modele",
     )
     args = ap.parse_args()
 
     if not PDF_DIR.exists():
-        print(f"[ERREUR] Répertoire PDF introuvable : {PDF_DIR}")
+        print(f"[ERREUR] Repertoire PDF introuvable : {PDF_DIR}")
         return
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Extraire le texte de tous les PDFs
+
     pages = extract_pages_from_pdfs(PDF_DIR)
     if not pages:
-        print("[ERREUR] Aucun texte extrait. Impossible d'entraîner.")
+        print("[ERREUR] Aucun texte extrait.")
         return
 
     if args.only is None or args.only == "tfidf_svd":
@@ -220,7 +203,7 @@ def main():
         train_word2vec(pages)
 
     print(f"\n{'='*60}")
-    print("[OK] Entraînement terminé !")
+    print("[OK] Entrainement termine.")
     print(f"{'='*60}")
 
 

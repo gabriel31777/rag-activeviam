@@ -1,9 +1,12 @@
+import os
+os.environ["PYTHONUNBUFFERED"] = "1"
+
 from flask import Flask, render_template, request, jsonify
 import subprocess
 import sys
-import os
+import threading
 
-# Flask Configuration
+# Config Flask
 app = Flask(__name__, template_folder='.')
 
 @app.route('/')
@@ -14,11 +17,11 @@ def index():
 def ask():
     data = request.json
     question = data.get('question')
-    style = data.get('style')  # 'value' ou 'free'
+    style = data.get('style')
     embedding = data.get('embedding', 'hybrid')
 
     command = [
-        sys.executable,
+        sys.executable, "-u",
         "src/04_rag_agent.py",
         "--q", question,
         "--mode", "chat",
@@ -26,25 +29,52 @@ def ask():
         "--embedding", embedding
     ]
 
-    print("\n" + "="*50)
-    print(f"🚀 EXÉCUTION DE LA COMMANDE :\n{' '.join(command)}")
-    print("="*50 + "\n")
+    SKIP = ('UserWarning', 'warnings.warn', 'FutureWarning', 'site-packages', 'NOTE: Redirects')
+
+    sys.stderr.write("\n" + "=" * 50 + "\n")
+    sys.stderr.write(f"  QUESTION: {question}\n")
+    sys.stderr.write(f"  EMBEDDING: {embedding} | STYLE: {style}\n")
+    sys.stderr.write("=" * 50 + "\n")
 
     try:
-        result = subprocess.run(
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUNBUFFERED"] = "1"
+
+        process = subprocess.Popen(
             command,
-            capture_output=True,
-            cwd=os.getcwd()
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=os.getcwd(),
+            env=env
         )
 
-        answer = result.stdout.decode('utf-8', errors='replace').strip()
-        error_output = result.stderr.decode('utf-8', errors='replace').strip()
+        # Thread de lecture stderr en temps reel
+        def stream_logs():
+            for raw_line in iter(process.stderr.readline, b''):
+                line = raw_line.decode('utf-8', errors='replace').rstrip()
+                if not line or any(p in line for p in SKIP):
+                    continue
+                sys.stderr.write(f"  {line}\n")
+                sys.stderr.flush()
 
-        if result.returncode != 0 or not answer:
-            if error_output:
-                print(f"❌ ERREUR (Logs) :\n{error_output}")
-                if not answer:
-                    answer = f"Erreur lors de l'exécution : {error_output}"
+        log_thread = threading.Thread(target=stream_logs, daemon=True)
+        log_thread.start()
+
+
+        process.wait()
+        log_thread.join(timeout=2)
+
+        answer = process.stdout.read().decode('utf-8', errors='replace').strip()
+        process.stdout.close()
+
+        if process.returncode != 0 and not answer:
+            answer = "Erreur lors du traitement de votre question. Veuillez reessayer."
+
+        preview = answer[:120] + ('...' if len(answer) > 120 else '')
+        sys.stderr.write(f"\n  [REPONSE] {preview}\n")
+        sys.stderr.write("=" * 50 + "\n\n")
+        sys.stderr.flush()
 
         return jsonify({'answer': answer})
 
@@ -52,5 +82,5 @@ def ask():
         return jsonify({'answer': str(e)})
 
 if __name__ == '__main__':
-    print("✅ Serveur en ligne ! Ouvrez http://127.0.0.1:5000")
+    print("[OK] Serveur en ligne ! Ouvrez http://127.0.0.1:5000")
     app.run(debug=True, port=5000)

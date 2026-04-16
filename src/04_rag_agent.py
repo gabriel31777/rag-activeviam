@@ -1,13 +1,7 @@
 """
 04_rag_agent.py
-Agent RAG avec fallback multi-modèle (Groq/Gemini).
-
-Source de données : PDFs indexés dans ChromaDB (PAS le CSV).
-
-Supporte trois méthodes d'embedding :
-    --embedding tfidf_svd          : TF-IDF + SVD
-    --embedding word2vec           : Word2Vec (gensim)
-    --embedding sentence_transformer : SentenceTransformers
+Agent RAG avec fallback multi-modele (Groq/Gemini).
+Recherche dans les PDFs indexes dans ChromaDB.
 
 Utilisation :
     python src/04_rag_agent.py --embedding tfidf_svd --q "What is the Scope 1 in Sasol 2021?"
@@ -34,15 +28,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from embeddings import get_embedding_function
 
 
-# =========================
 # Configuration
-# =========================
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LOCALAPPDATA = os.environ.get("LOCALAPPDATA", ".")
 MODELS_DIR = Path(LOCALAPPDATA) / "rag-activeviam" / "models"
 
-# Configuration par type d'embedding (même que 02_index_pdfs.py)
+# Config par type d'embedding (meme que 02_index_pdfs.py)
 EMBEDDING_CONFIG = {
     "tfidf_svd": {
         "chroma_dir": Path(LOCALAPPDATA) / "rag-activeviam" / "chroma_tfidf",
@@ -63,39 +55,49 @@ EMBEDDING_CONFIG = {
 
 DOC_YEAR_RE = re.compile(r"in\s+(.+?)\s+document\s+in\s+(\d{4})\??$", re.IGNORECASE)
 
-# Variables globales
+
 _COLLECTION = None
 _COLLECTION_TFIDF = None
 _COLLECTION_ST = None
 _IS_HYBRID = False
 _DEBUG_MODE = False
 
+def _log(msg: str) -> None:
+    """Log sur stderr."""
+    sys.stderr.write(msg + "\n")
+    sys.stderr.flush()
 
-# =========================
+
 # Initialisation ChromaDB
-# =========================
 
 def init_collection(embedding_type: str = "tfidf_svd") -> Any:
-    """Initialise la collection ChromaDB selon le type d'embedding."""
+    """Charge la collection ChromaDB pour le type d'embedding choisi."""
     global _COLLECTION, _COLLECTION_TFIDF, _COLLECTION_ST, _IS_HYBRID
+
+    _log(f"[1/4] INITIALISATION -- Embedding: {embedding_type}")
 
     if embedding_type == "hybrid":
         _IS_HYBRID = True
-        # Init TF-IDF
+
         cfg_tfidf = EMBEDDING_CONFIG["tfidf_svd"]
+        _log("  -> Chargement du modele TF-IDF + SVD...")
         emb_fn_tfidf = get_embedding_function("tfidf_svd", model_path=str(cfg_tfidf["model_path"]))
         client_tfidf = chromadb.PersistentClient(path=str(cfg_tfidf["chroma_dir"]))
         _COLLECTION_TFIDF = client_tfidf.get_or_create_collection(
             name=cfg_tfidf["collection"], embedding_function=emb_fn_tfidf
         )
+        _log(f"  -> Collection TF-IDF chargee ({_COLLECTION_TFIDF.count()} chunks)")
         
-        # Init ST
+
         cfg_st = EMBEDDING_CONFIG["sentence_transformer"]
+        _log("  -> Chargement du modele SentenceTransformers...")
         emb_fn_st = get_embedding_function("sentence_transformer")
         client_st = chromadb.PersistentClient(path=str(cfg_st["chroma_dir"]))
         _COLLECTION_ST = client_st.get_or_create_collection(
             name=cfg_st["collection"], embedding_function=emb_fn_st
         )
+        _log(f"  -> Collection SentenceTransformers chargee ({_COLLECTION_ST.count()} chunks)")
+        _log("  -> Mode HYBRIDE actif (RRF: TF-IDF + SentenceTransformers)")
         return (_COLLECTION_TFIDF, _COLLECTION_ST)
     else:
         _IS_HYBRID = False
@@ -104,6 +106,7 @@ def init_collection(embedding_type: str = "tfidf_svd") -> Any:
         collection_name = config["collection"]
         model_path = config["model_path"]
 
+        _log(f"  -> Chargement du modele {embedding_type}...")
         emb_fn = get_embedding_function(
             embedding_type,
             model_path=str(model_path) if model_path else None,
@@ -115,15 +118,14 @@ def init_collection(embedding_type: str = "tfidf_svd") -> Any:
             embedding_function=emb_fn,
             metadata={"hnsw:space": "cosine"},
         )
+        _log(f"  -> Collection '{collection_name}' chargee ({_COLLECTION.count()} chunks)")
         return _COLLECTION
 
 
-# =========================
-# Outil de l'agent (function calling)
-# =========================
+# Outil de recherche (function calling)
 
 def search_database(query: str, doc_name: str = "", year: int = 0) -> str:
-    """Recherche dans la base de données vectorielle des fragments de rapports financiers/ESG."""
+    """Recherche dans la base vectorielle les fragments pertinents."""
     global _COLLECTION, _COLLECTION_TFIDF, _COLLECTION_ST, _IS_HYBRID, _DEBUG_MODE
     
     if not _IS_HYBRID and _COLLECTION is None:
@@ -141,10 +143,10 @@ def search_database(query: str, doc_name: str = "", year: int = 0) -> str:
     elif len(where_conditions) > 1:
         where_filter = {"$and": where_conditions}
 
+    filter_info = f"doc='{doc_name}'" if doc_name else "sans filtre"
+    _log(f"[3/4] RECHERCHE dans ChromaDB -- requete: '{query}' | {filter_info}")
     if _DEBUG_MODE:
-        print(f"\n[DEBUG Outil] 'search_database' appelé :")
-        print(f"  -> requête : '{query}'")
-        print(f"  -> document : '{doc_name}'")
+        print(f"\n[DEBUG] search_database : query='{query}', doc='{doc_name}'")
 
     kwargs = dict(
         query_texts=[query],
@@ -156,21 +158,23 @@ def search_database(query: str, doc_name: str = "", year: int = 0) -> str:
 
     try:
         if _IS_HYBRID:
+            _log("  -> Recherche parallele: TF-IDF + SentenceTransformers")
             res1 = _COLLECTION_TFIDF.query(**kwargs)
             res2 = _COLLECTION_ST.query(**kwargs)
+            _log(f"  -> TF-IDF: {len(res1['documents'][0])} resultats | ST: {len(res2['documents'][0])} resultats")
             
             scores = {}
             doc_map = {}
             meta_map = {}
             
-            for rank, (txt, meta) in enumerate(zip(res1["documents"][0], res1["metadatas"][0])):
-                uid = f"{meta.get('doc', '')}_{meta.get('page', '')}"
+            for rank, (txt, meta, idstr) in enumerate(zip(res1["documents"][0], res1["metadatas"][0], res1["ids"][0])):
+                uid = idstr
                 scores[uid] = scores.get(uid, 0.0) + 1.0 / (60 + rank)
                 doc_map[uid] = txt
                 meta_map[uid] = meta
                 
-            for rank, (txt, meta) in enumerate(zip(res2["documents"][0], res2["metadatas"][0])):
-                uid = f"{meta.get('doc', '')}_{meta.get('page', '')}"
+            for rank, (txt, meta, idstr) in enumerate(zip(res2["documents"][0], res2["metadatas"][0], res2["ids"][0])):
+                uid = idstr
                 scores[uid] = scores.get(uid, 0.0) + 1.0 / (60 + rank)
                 doc_map[uid] = txt
                 meta_map[uid] = meta
@@ -178,20 +182,22 @@ def search_database(query: str, doc_name: str = "", year: int = 0) -> str:
             sorted_uids = sorted(scores.keys(), key=lambda k: scores[k], reverse=True)
             docs = [doc_map[uid] for uid in sorted_uids[:12]]
             metas = [meta_map[uid] for uid in sorted_uids[:12]]
+            _log(f"  -> Fusion RRF: {len(docs)} fragments selectionnes")
         else:
             res = _COLLECTION.query(**kwargs)
             docs = res["documents"][0]
             metas = res["metadatas"][0]
+            _log(f"  -> {len(docs)} fragments recuperes")
 
         if not docs:
-            return "Aucun document trouvé correspondant aux critères."
+            return "Aucun document trouve correspondant aux criteres."
 
         ctx_block = []
         for i, (txt, meta) in enumerate(zip(docs, metas), 1):
-            m_year = meta.get("year", "Inconnu")
-            m_doc = meta.get("doc", "Inconnu")
+            m_year = meta.get("year", "?")
+            m_doc = meta.get("doc", "?")
             m_page = meta.get("page", "?")
-            header = f"--- [Contexte {i} | Document : {m_doc} | Année : {m_year} | Page : {m_page}] ---"
+            header = f"--- [Contexte {i} | Document : {m_doc} | Annee : {m_year} | Page : {m_page}] ---"
             ctx_block.append(f"{header}\n{txt}\n")
         return "\n".join(ctx_block)
 
@@ -199,18 +205,18 @@ def search_database(query: str, doc_name: str = "", year: int = 0) -> str:
         return f"Erreur lors de la recherche : {str(e)}"
 
 
-# Schéma JSON de l'outil
+# Schema JSON de l'outil pour le function calling
 DATABASE_TOOL = {
     "type": "function",
     "function": {
         "name": "search_database",
-        "description": "Recherche dans la base de données vectorielle des fragments de rapports financiers/ESG.",
+        "description": "Recherche dans la base vectorielle les fragments de rapports financiers/ESG.",
         "parameters": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Requête de recherche sémantique (ex: 'Scope 1 emissions', 'total revenue').",
+                    "description": "Requete de recherche semantique (ex: 'Scope 1 emissions', 'total revenue').",
                 },
                 "doc_name": {
                     "type": "string",
@@ -218,7 +224,7 @@ DATABASE_TOOL = {
                 },
                 "year": {
                     "type": "integer",
-                    "description": "Année du rapport (ex: 2021). 0 si inconnue.",
+                    "description": "Annee du rapport (ex: 2021). 0 si inconnue.",
                 },
             },
             "required": ["query"],
@@ -227,16 +233,14 @@ DATABASE_TOOL = {
 }
 
 
-# =========================
 # Logique de l'agent
-# =========================
 
 def get_api_key() -> str:
-    """Récupère la clé API Groq."""
+    """Recupere la cle API Groq."""
     load_dotenv()
     key = os.getenv("GROQ_API_KEY")
     if not key:
-        raise RuntimeError("GROQ_API_KEY non définie.")
+        raise RuntimeError("GROQ_API_KEY non definie.")
     return key
 
 
@@ -246,38 +250,37 @@ def run_agent(
     temperature: float = 0.1,
     answer_style: str = "value",
 ) -> tuple[str, int]:
-    """Exécute l'agent RAG avec fallback multi-modèle.
-
-    Retourne (réponse, nombre_de_recherches).
-    """
+    """Execute l'agent RAG. Retourne (reponse, nb_recherches)."""
+    _log(f"[2/4] AGENT RAG -- Question: '{question[:80]}...'" if len(question) > 80 else f"[2/4] AGENT RAG -- Question: '{question}'")
+    _log(f"  -> Style de reponse: {answer_style}")
     groq_api_key = get_api_key()
     gemini_api_key = os.getenv("GEMINI_API_KEY")
 
     if answer_style == "value":
         behavior_instr = (
-            "Vous devez retourner UNIQUEMENT la valeur numérique exacte sans texte supplémentaire. "
-            "N'écrivez pas de phrases. Gardez la réponse minimale."
+            "Vous devez retourner UNIQUEMENT la valeur numerique exacte sans texte supplementaire. "
+            "N'ecrivez pas de phrases. Gardez la reponse minimale."
         )
     elif answer_style == "free":
         behavior_instr = (
-            "Expliquez COMMENT vous avez trouvé la valeur. Détaillez les années/documents analysés."
+            "Expliquez COMMENT vous avez trouve la valeur. Detaillez les annees/documents analyses."
         )
     else:
-        behavior_instr = "Répondez naturellement et de façon concise."
+        behavior_instr = "Repondez naturellement et de facon concise."
 
     system_instruction = (
-        "Vous êtes un bot expert en extraction de données financières. Votre SEUL travail est de trouver "
-        "une valeur numérique spécifique dans des rapports d'entreprise stockés dans une base vectorielle.\n\n"
-        "RÈGLES CRITIQUES :\n"
-        "1. Appelez TOUJOURS search_database. Ne dites JAMAIS 'je n'ai pas accès' — vous AVEZ accès via l'outil.\n"
-        "2. Ne demandez JAMAIS à l'utilisateur de chercher. VOUS devez continuer à chercher jusqu'à trouver.\n"
-        "3. Ne répondez JAMAIS avec des phrases quand answer_style est 'value'. Répondez UNIQUEMENT avec le nombre.\n"
-        "4. Si la première recherche ne donne rien d'utile, RÉESSAYEZ avec d'autres mots-clés ou sans filtre doc_name.\n"
-        "5. Les tableaux utilisent '|' comme séparateur. L'en-tête montre les années (ex: 2021 | 2020 | 2019). "
-        "Associez l'année demandée à la bonne colonne SOIGNEUSEMENT.\n"
-        "6. Les rapports peuvent contenir des données historiques pour plusieurs années.\n"
-        "7. Si vous voyez la métrique mais ne pouvez pas identifier la colonne, donnez votre meilleure estimation.\n"
-        "8. Si vous n'arrivez vraiment pas à trouver l'information dans les fichiers (même après recherche), PUIS vous pouvez utiliser vos connaissances générales pour répondre. Mais dans ce cas, vous DEVEZ OBLIGATOIREMENT commencer votre réponse par : 'Non trouvé dans les fichiers : '.\n"
+        "Vous etes un bot expert en extraction de donnees financieres. Votre SEUL travail est de trouver "
+        "une valeur numerique specifique dans des rapports d'entreprise stockes dans une base vectorielle.\n\n"
+        "REGLES CRITIQUES :\n"
+        "1. Appelez TOUJOURS search_database. Ne dites JAMAIS 'je n'ai pas acces' -- vous AVEZ acces via l'outil.\n"
+        "2. Ne demandez JAMAIS a l'utilisateur de chercher. VOUS devez continuer a chercher jusqu'a trouver.\n"
+        "3. Ne repondez JAMAIS avec des phrases quand answer_style est 'value'. Repondez UNIQUEMENT avec le nombre.\n"
+        "4. Si la premiere recherche ne donne rien d'utile, REESSAYEZ avec d'autres mots-cles ou sans filtre doc_name.\n"
+        "5. Les tableaux utilisent '|' comme separateur. L'en-tete montre les annees (ex: 2021 | 2020 | 2019). "
+        "Associez l'annee demandee a la bonne colonne SOIGNEUSEMENT.\n"
+        "6. Les rapports peuvent contenir des donnees historiques pour plusieurs annees.\n"
+        "7. Si vous voyez la metrique mais ne pouvez pas identifier la colonne, donnez votre meilleure estimation.\n"
+        "8. Si vous n'arrivez vraiment pas a trouver l'information dans les fichiers (meme apres recherche), PUIS vous pouvez utiliser vos connaissances generales pour repondre. Mais dans ce cas, vous DEVEZ OBLIGATOIREMENT commencer votre reponse par : 'Non trouve dans les fichiers : '.\n"
         "9. Pour les sommes (ex: 'Total Scope 1 et 2'), cherchez chaque composante et calculez la somme.\n"
         f"10. {behavior_instr}"
     )
@@ -315,8 +318,8 @@ def run_agent(
                 "role": "user",
                 "content": (
                     "Vous avez atteint la limite de recherches. "
-                    "Répondez MAINTENANT avec les informations déjà trouvées. "
-                    "Si vous n'avez pas trouvé la valeur exacte, donnez votre meilleure estimation."
+                    "Repondez MAINTENANT avec les informations deja trouvees. "
+                    "Si vous n'avez pas trouve la valeur exacte, donnez votre meilleure estimation."
                 ),
             })
             if last_client and last_model_name:
@@ -331,6 +334,7 @@ def run_agent(
                     pass
             return "Limite de recherches atteinte.", num_searches
 
+        _log(f"  -> Etape {step + 1}/{MAX_STEPS} (recherches: {num_searches}/{MAX_SEARCHES})")
         response = None
         while True:
             models_queue = list(all_models)
@@ -339,8 +343,9 @@ def run_agent(
                 target_model = models_queue[0]
                 provider, actual_model_name = target_model.split(":", 1)
 
+                _log(f"  -> Appel LLM: {target_model}")
                 if _DEBUG_MODE:
-                    sys.stdout.write(f"  -> Tentative du modèle: {target_model}... ")
+                    sys.stdout.write(f"  -> {target_model}... ")
                     sys.stdout.flush()
 
                 if provider == "groq":
@@ -348,7 +353,7 @@ def run_agent(
                 else:
                     if not gemini_api_key:
                         if _DEBUG_MODE:
-                            sys.stdout.write("Ignoré (pas de clé Gemini API)\n")
+                            sys.stdout.write("Ignore (pas de cle Gemini)\n")
                             sys.stdout.flush()
                         models_queue.pop(0)
                         continue
@@ -366,6 +371,7 @@ def run_agent(
                         tool_choice="auto",
                         temperature=temperature,
                     )
+                    _log(f"     OK -- Reponse recue de {actual_model_name}")
                     if _DEBUG_MODE:
                         sys.stdout.write("OK\n")
                         sys.stdout.flush()
@@ -376,22 +382,24 @@ def run_agent(
                     last_err = str(e)
                     models_queue.pop(0)
                     err_msg = last_err.split('\n')[0][:80]
+                    _log(f"     ECHEC ({err_msg}) -> passage au modele suivant")
                     if _DEBUG_MODE:
-                        sys.stdout.write(f"Échec ({err_msg}...)\n")
+                        sys.stdout.write(f"Echec ({err_msg}...)\n")
                         sys.stdout.flush()
                     
             if response is not None:
                 break
                 
             if _DEBUG_MODE:
-                print(f"\n[ATTENTION] Tous les modèles sont épuisés (Dernière erreur : {last_err}). Interruption pour l'interface web.")
+                print(f"\n[ATTENTION] Tous les modeles sont epuises (Derniere erreur : {last_err}).")
             
-            return f"❌ Erreur : Tous les modèles de l'IA sont surchargés (API Rate Limit). Veuillez réessayer dans quelques secondes. (Détail: {last_err[:50]})", num_searches
+            return f"Erreur : Tous les modeles sont surcharges (API Rate Limit). Veuillez reessayer dans quelques secondes. (Detail: {last_err[:50]})", num_searches
 
         response_message = response.choices[0].message
         tool_calls = response_message.tool_calls
 
         if not tool_calls:
+            _log(f"[4/4] REPONSE -- {num_searches} recherches effectuees")
             return response_message.content, num_searches
 
         assistant_msg = {"role": "assistant", "content": response_message.content or ""}
@@ -413,6 +421,7 @@ def run_agent(
                 except Exception:
                     args = {}
 
+                _log(f"  -> Recherche {num_searches + 1}")
                 tool_resp = search_database(
                     query=args.get("query", ""),
                     doc_name=args.get("doc_name", ""),
@@ -427,12 +436,10 @@ def run_agent(
                     "content": tool_resp,
                 })
 
-    return "L'agent a épuisé le nombre maximum d'étapes.", num_searches
+    return "Nombre maximum d'etapes atteint.", num_searches
 
 
-# =========================
-# Point d'entrée
-# =========================
+# Main
 
 def main():
     global _DEBUG_MODE
@@ -454,10 +461,14 @@ def main():
     if args.mode == "debug":
         _DEBUG_MODE = True
 
+    _log("="*50)
+    _log("          RAG-ACTIVEVIAM AGENT")
+    _log("="*50)
     init_collection(args.embedding)
 
     try:
         answer, num_searches = run_agent(args.q, args.model, args.temp, args.answer_style)
+        _log("="*50)
 
         if _DEBUG_MODE:
             print(f"\n[DEBUG] RECHERCHES : {num_searches}")

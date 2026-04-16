@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 
-# Configuration de style
+# Style
 plt.style.use('ggplot')
 sns.set_context("talk")
 sns.set_palette("crest")
@@ -17,7 +17,7 @@ colors = ['#8ca2c4', '#688cb6', '#4775a6', '#214e7a']
 fig, ax = plt.subplots(figsize=(10, 6))
 bars = ax.barh(models, scores, color=colors, edgecolor='black', linewidth=1.2)
 
-# Annotation des valeurs
+# Annotations
 for bar in bars:
     width = bar.get_width()
     ax.text(width + 0.5, bar.get_y() + bar.get_height()/2, f'{width}%', 
@@ -53,11 +53,11 @@ for name, (x, y, color) in data.items():
 
 ax.set_xlim(0, 11)
 ax.set_ylim(0, 11)
-ax.set_xlabel("Capacité Sémantique (Généralisation)", fontweight='bold', fontsize=13)
-ax.set_ylabel("Précision Lexicale Exacte (Tâches Tabulaires)", fontweight='bold', fontsize=13)
-ax.set_title("Matrice de Qualité des Algorithmes (Théorique)", fontsize=16, fontweight='bold', pad=20)
+ax.set_xlabel("Capacite Semantique (Generalisation)", fontweight='bold', fontsize=13)
+ax.set_ylabel("Precision Lexicale Exacte (Taches Tabulaires)", fontweight='bold', fontsize=13)
+ax.set_title("Matrice de Qualite des Algorithmes (Theorique)", fontsize=16, fontweight='bold', pad=20)
 
-# Zones
+# Lignes de separation
 ax.axhline(5, color='gray', linestyle='-', linewidth=0.8, alpha=0.5)
 ax.axvline(5, color='gray', linestyle='-', linewidth=0.8, alpha=0.5)
 
@@ -65,4 +65,4 @@ plt.tight_layout()
 plt.savefig("algo_tradeoff.png", dpi=300)
 plt.close()
 
-print("Graphiques générés avec succès : retrieval_performance.png et algo_tradeoff.png")
+print("Graphiques generes : retrieval_performance.png et algo_tradeoff.png")

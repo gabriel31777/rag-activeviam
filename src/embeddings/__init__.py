@@ -1,11 +1,11 @@
 """
-Module embeddings — Fonctions d'embedding partagées pour le pipeline RAG.
+Module embeddings -- fonctions d'embedding pour le pipeline RAG.
 
-Fournit :
-- TfidfSvdEmbeddingFunction  : embedding basé sur TF-IDF + SVD
-- Word2VecEmbeddingFunction  : embedding basé sur un vrai Word2Vec (gensim)
-- SentenceTransformerWrapper : wrapper autour de sentence-transformers
-- get_embedding_function()   : factory pour instancier l'embedding par nom
+Expose :
+- TfidfSvdEmbeddingFunction
+- Word2VecEmbeddingFunction
+- SentenceTransformerWrapper
+- get_embedding_function() (factory)
 """
 
 from .tfidf_svd_embedding import TfidfSvdEmbeddingFunction

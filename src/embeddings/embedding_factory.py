@@ -1,13 +1,10 @@
 """
 embedding_factory.py
-Factory pour instancier la bonne fonction d'embedding selon un identifiant.
+Factory pour instancier la fonction d'embedding par identifiant.
 
 Utilisation :
     from embeddings import get_embedding_function
-
     emb = get_embedding_function("tfidf_svd", model_path="model.pkl")
-    emb = get_embedding_function("word2vec", model_path="w2v_model.pkl")
-    emb = get_embedding_function("sentence_transformer")
 """
 
 from __future__ import annotations
@@ -21,16 +18,12 @@ def get_embedding_function(
     model_path: Optional[str | Path] = None,
     model_name: Optional[str] = None,
 ) -> Any:
-    """Instancie et retourne une fonction d'embedding selon le type demandé.
+    """Retourne la fonction d'embedding correspondant au type demande.
 
-    Paramètres
-    ----------
-    embedding_type : str
-        Type d'embedding : 'tfidf_svd', 'word2vec' ou 'sentence_transformer'.
-    model_path : str | Path, optionnel
-        Chemin du modèle pickle (requis pour 'tfidf_svd' et 'word2vec').
-    model_name : str, optionnel
-        Nom du modèle HuggingFace (pour 'sentence_transformer').
+    Args:
+        embedding_type : 'tfidf_svd', 'word2vec' ou 'sentence_transformer'
+        model_path : chemin du pickle (requis pour tfidf_svd et word2vec)
+        model_name : nom HuggingFace (pour sentence_transformer)
     """
     embedding_type = embedding_type.lower().strip()
 
@@ -38,18 +31,13 @@ def get_embedding_function(
         from .tfidf_svd_embedding import TfidfSvdEmbeddingFunction
 
         if model_path is None:
-            raise ValueError(
-                "Le paramètre 'model_path' est requis pour l'embedding TF-IDF + SVD."
-            )
+            raise ValueError("model_path requis pour l'embedding TF-IDF + SVD.")
         return TfidfSvdEmbeddingFunction(model_path)
 
     elif embedding_type in ("word2vec", "w2v"):
         from .word2vec_embedding import Word2VecEmbeddingFunction
 
-        if model_path is None:
-            raise ValueError(
-                "Le paramètre 'model_path' est requis pour l'embedding Word2Vec."
-            )
+            raise ValueError("model_path requis pour l'embedding Word2Vec.")
         return Word2VecEmbeddingFunction(model_path)
 
     elif embedding_type in ("sentence_transformer", "sentence_transformers", "st", "sbert"):
@@ -63,5 +51,5 @@ def get_embedding_function(
         types_valides = ["tfidf_svd", "word2vec", "sentence_transformer"]
         raise ValueError(
             f"Type d'embedding inconnu : '{embedding_type}'. "
-            f"Types valides : {types_valides}"
+            f"Valides : {types_valides}"
         )

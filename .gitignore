@@ -1,12 +1,41 @@
+# Environnement Python
 .venv/
 __pycache__/
 *.pyc
+*.pyo
 
-data/raw/
-data/processed/
+# Donnees et PDFs
+data/
 
-.ipynb_checkpoints/
+# Notebooks
+notebooks/
+
+# Archive (anciens scripts)
+src/archive/
+
+# Scripts de test temporaires
+tmp_test_*.py
+
+# Fichiers temporaires
+temp_report.txt
+temp_report_utf8.txt
+
+# Images generees (reproductibles via generate_plots.py)
+*.png
+
+# PDF et documents de presentation
+*.pdf
+ilovepdf_pages-to-jpg/
+reports/
+
+# Variables d'environnement
 .env
 .env.local
+
+# Base vectorielle ChromaDB (stockee en local via LOCALAPPDATA)
 chroma/
+
+# Divers
 *.log
+.ipynb_checkpoints/
+.DS_Store

@@ -1,9 +1,9 @@
 """
 03_eval_retrieval.py
-Évalue la qualité du retrieval (Hit@K) en utilisant le CSV comme ground truth.
+Evalue le retrieval (Hit@K) avec le CSV comme verite terrain.
 
-Le CSV fournit les paires (Question, Value) = gabarito.
-La busca é feita SOMENTE na base de PDFs indexada no ChromaDB.
+Le CSV fournit les paires (Question, Value).
+La recherche est faite uniquement dans la base de PDFs indexee dans ChromaDB.
 
 Utilisation :
     python src/03_eval_retrieval.py --embedding tfidf_svd
@@ -61,17 +61,17 @@ EMBEDDING_CONFIG = {
 
 
 # =========================
-# Utilitaires de matching
+# Fonctions de matching
 # =========================
 
-# Nombres avec séparateur de milliers par espace : 26 262, 1 234 567
+# Nombres avec separateur de milliers par espace
 SPACED_THOUSANDS_RE = re.compile(r"\b\d{1,3}(?:\s\d{3})+\b")
-# Nombres simples : 20835, 95.0, 3.6
+# Nombres simples
 SIMPLE_NUMBER_RE = re.compile(r"\b\d+(?:\.\d+)?\b")
 
 
 def parse_doc_year(question: str) -> Tuple[Optional[str], Optional[int]]:
-    """Extrait le nom du document et l'année depuis la question."""
+    """Extrait le nom du document et l'annee depuis la question."""
     m = DOC_YEAR_RE.search((question or "").strip())
     if not m:
         return None, None
@@ -79,12 +79,12 @@ def parse_doc_year(question: str) -> Tuple[Optional[str], Optional[int]]:
 
 
 def normalize_text(s: str) -> str:
-    """Normalise un texte pour comparaison."""
+    """Normalise un texte pour la comparaison."""
     return "".join((s or "").lower().split())
 
 
 def try_float(x: str) -> Optional[float]:
-    """Tente de convertir en float."""
+    """Conversion en float, None si echec."""
     try:
         return float(str(x).strip())
     except Exception:
@@ -92,7 +92,7 @@ def try_float(x: str) -> Optional[float]:
 
 
 def extract_numeric_candidates(text: str) -> List[float]:
-    """Extrait les candidats numériques d'un texte."""
+    """Extrait les valeurs numeriques candidates d'un texte."""
     candidates: List[float] = []
     t = text or ""
 
@@ -116,7 +116,7 @@ def extract_numeric_candidates(text: str) -> List[float]:
 
 
 def detect_unit_multipliers(text: str) -> List[float]:
-    """Détecte les multiplicateurs d'unités dans le texte."""
+    """Detecte les multiplicateurs d'unites (billion, million, etc.)."""
     t = (text or "").lower()
     mults = []
     if "rbn" in t or "(rbn" in t or "bn" in t or "billion" in t:
@@ -125,12 +125,12 @@ def detect_unit_multipliers(text: str) -> List[float]:
         mults.append(1e6)
     if "thousand" in t or "k)" in t or " k " in t:
         mults.append(1e3)
-    return list(dict.fromkeys(mults))  # Dédupliqué
+    return list(dict.fromkeys(mults))
 
 
 def value_matches(gold_value: str, retrieved_text: str) -> bool:
-    """Vérifie si la valeur attendue est trouvée dans le texte récupéré."""
-    # A) Match textuel
+    """Verifie si la valeur attendue est presente dans le texte recupere."""
+    # Match textuel direct
     gv = normalize_text(gold_value)
     rt = normalize_text(retrieved_text)
     if gv and gv in rt:
@@ -143,7 +143,7 @@ def value_matches(gold_value: str, retrieved_text: str) -> bool:
     if gf.is_integer() and str(int(gf)) in rt:
         return True
 
-    # B) Match numérique
+    # Match numerique avec tolerances
     gold = float(gf)
     candidates = extract_numeric_candidates(retrieved_text)
     if not candidates:
@@ -164,11 +164,11 @@ def value_matches(gold_value: str, retrieved_text: str) -> bool:
 
 
 # =========================
-# Point d'entrée
+# Main
 # =========================
 
 def main():
-    ap = argparse.ArgumentParser(description="Évaluer le retrieval (Hit@K)")
+    ap = argparse.ArgumentParser(description="Evaluation du retrieval (Hit@K)")
     ap.add_argument(
         "--embedding",
         choices=["tfidf_svd", "word2vec", "sentence_transformer", "hybrid"],
@@ -205,7 +205,7 @@ def main():
         model_path = config["model_path"]
 
         print(f"[INFO] Embedding   : {args.embedding}")
-        print(f"[INFO] CSV (gabarito) : {CSV_PATH}")
+        print(f"[INFO] CSV (verite terrain) : {CSV_PATH}")
         print(f"[INFO] ChromaDB    : {chroma_dir}")
         print(f"[INFO] Collection  : {collection_name}")
         print(f"[INFO] TOP_K       : {args.top_k}")
@@ -233,7 +233,7 @@ def main():
             print(f"         python src/02_index_pdfs.py --embedding {args.embedding}")
             return
 
-    # Charger le CSV (gabarito)
+    # Charger le CSV (verite terrain)
     df = pd.read_csv(CSV_PATH)
     for col in list(df.columns):
         if col.lower().startswith("unnamed"):
@@ -242,7 +242,7 @@ def main():
     hits = 0
     fails_shown = 0
 
-    for row in tqdm(df.itertuples(index=False), total=len(df), desc="Évaluation"):
+    for row in tqdm(df.itertuples(index=False), total=len(df), desc="Evaluation"):
         q = str(row.Question)
         gold = str(row.Value)
 
@@ -290,14 +290,14 @@ def main():
         else:
             if fails_shown < 5:
                 fails_shown += 1
-                print(f"\n--- Échec ---")
+                print(f"\n--- Echec ---")
                 print("Q :", q)
                 print("Valeur attendue :", gold)
                 print("Top1 :", docs[0][:200] if docs else "(vide)")
 
     rate = hits / len(df) if len(df) > 0 else 0
     print(f"\n{'='*60}")
-    print(f"  RÉSULTATS — {args.embedding}")
+    print(f"  RESULTATS -- {args.embedding}")
     print(f"  Hit@{args.top_k} : {rate:.3f} ({hits}/{len(df)})")
     print(f"{'='*60}")
 

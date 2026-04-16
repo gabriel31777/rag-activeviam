@@ -1,9 +1,9 @@
 """
 05_eval_agent.py
-Évalue la précision de l'agent RAG end-to-end.
+Evaluation end-to-end de l'agent RAG.
 
-Le CSV fournit les questions et valeurs attendues (gabarito).
-L'agent cherche dans les PDFs indexés dans ChromaDB.
+Le CSV fournit les questions et valeurs attendues.
+L'agent recherche dans les PDFs indexes dans ChromaDB.
 
 Utilisation :
     python src/05_eval_agent.py --embedding tfidf_svd --limit 20
@@ -24,12 +24,12 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# Importation dynamique des modules
+
 agent_module = importlib.import_module("04_rag_agent")
 run_agent = agent_module.run_agent
 init_collection = agent_module.init_collection
 
-# Importation de value_matches depuis le module d'évaluation du retrieval
+
 eval_module = importlib.import_module("03_eval_retrieval")
 value_matches = eval_module.value_matches
 
@@ -43,19 +43,19 @@ def eval_agent(
     seed: int = None,
     embedding: str = "tfidf_svd",
 ):
-    """Évalue l'agent sur un échantillon aléatoire du dataset."""
+    """Evalue l'agent sur un echantillon aleatoire du dataset."""
 
     print(f"[INFO] Initialisation ({embedding})...")
     init_collection(embedding)
 
-    print(f"[INFO] Chargement du gabarito : {CSV_PATH}")
+    print(f"[INFO] Chargement de la verite terrain : {CSV_PATH}")
     df = pd.read_csv(CSV_PATH)
 
     for col in list(df.columns):
         if col.lower().startswith("unnamed"):
             df = df.drop(columns=[col])
 
-    # Filtrer les questions à valeur zéro
+    # Filtrer les questions a valeur zero
     before = len(df)
     df = df[
         df["Value"]
@@ -63,15 +63,15 @@ def eval_agent(
         .str.strip()
         .apply(lambda v: v not in ("0", "0.0", "0.00"))
     ].reset_index(drop=True)
-    print(f"[INFO] {before - len(df)} questions à valeur zéro filtrées ({len(df)} restantes).")
+    print(f"[INFO] {before - len(df)} questions a valeur zero filtrees ({len(df)} restantes).")
 
-    # Échantillonnage aléatoire
+
     if seed is not None:
         print(f"[INFO] Graine : {seed}")
     else:
         import random
         seed = random.randint(0, 99999)
-        print(f"[INFO] Graine aléatoire (pour reproduire : --seed {seed})")
+        print(f"[INFO] Graine aleatoire (pour reproduire : --seed {seed})")
 
     df_eval = df.sample(n=min(limit, len(df)), random_state=seed).reset_index(drop=True)
 
@@ -107,19 +107,19 @@ def eval_agent(
         print(f"       Attendu : {gold}  |  Agent : {agent_answer}  (Recherches : {n_searches})")
         print()
 
-        # Pause pour éviter le rate limiting
+        # Pause anti-rate-limit
         time.sleep(30)
 
     rate = hits / total if total > 0 else 0
     print("=" * 60)
-    print(f"  RÉSULTATS — {emb_label}")
-    print(f"  Modèle : {model}  |  Graine : {seed}")
-    print(f"  Réussis : {hits}/{total}  |  Précision : {rate * 100:.1f}%")
+    print(f"  RESULTATS -- {emb_label}")
+    print(f"  Modele : {model}  |  Graine : {seed}")
+    print(f"  Reussis : {hits}/{total}  |  Precision : {rate * 100:.1f}%")
     print("=" * 60)
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="Évaluation de l'agent RAG")
+    ap = argparse.ArgumentParser(description="Evaluation de l'agent RAG")
     ap.add_argument("--limit", type=int, default=15)
     ap.add_argument("--model", default="llama-3.3-70b-versatile")
     ap.add_argument("--seed", type=int, default=None)

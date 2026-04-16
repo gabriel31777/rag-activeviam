@@ -1,9 +1,9 @@
 """
 02_index_pdfs.py
-Indexe les PDFs dans ChromaDB en utilisant un embedding au choix.
+Indexation des PDFs dans ChromaDB avec un embedding au choix.
 
-Source de données : PDFs bruts (data/raw/Structured data/)
-Le CSV n'est PAS utilisé ici — il sert uniquement pour l'évaluation.
+Source : PDFs bruts dans data/raw/Structured data/
+Le CSV n'est pas utilise ici (evaluation uniquement).
 
 Utilisation :
     python src/02_index_pdfs.py --embedding tfidf_svd
@@ -38,14 +38,13 @@ PDF_DIR = PROJECT_ROOT / "data" / "raw" / "Structured data"
 LOCALAPPDATA = os.environ.get("LOCALAPPDATA", ".")
 MODELS_DIR = Path(LOCALAPPDATA) / "rag-activeviam" / "models"
 
-# Chunking par page : on garde chaque page entière.
-# Seules les pages très longues (> MAX_PAGE_SIZE) sont découpées.
+# On garde chaque page entiere, sauf si elle depasse MAX_PAGE_SIZE
 MAX_PAGE_SIZE = 6000
 CHUNK_OVERLAP = 500
 
 YEAR_RE = re.compile(r"\b(20\d{2})\b")
 
-# Mots-clés pour détecter la compagnie dans le PDF
+# Mots-cles pour detecter la compagnie dans le PDF
 COMPANY_KEYWORDS = {
     "absa":               "absa",
     "clicks":             "clicks",
@@ -63,7 +62,7 @@ COMPANY_KEYWORDS = {
     "ssw":                "ssw",
 }
 
-# Noms des collections et chemins selon l'embedding
+# Config par type d'embedding
 EMBEDDING_CONFIG = {
     "tfidf_svd": {
         "chroma_dir": Path(LOCALAPPDATA) / "rag-activeviam" / "chroma_tfidf",
@@ -84,11 +83,11 @@ EMBEDDING_CONFIG = {
 
 
 # =========================
-# Utilitaires
+# Fonctions utilitaires
 # =========================
 
 def detect_company(text_sample: str) -> str:
-    """Détecte le nom de la compagnie à partir du texte."""
+    """Detecte la compagnie a partir du texte."""
     lower = text_sample.lower()
     for kw, canonical in COMPANY_KEYWORDS.items():
         if kw in lower:
@@ -97,7 +96,7 @@ def detect_company(text_sample: str) -> str:
 
 
 def detect_report_year(text_sample: str) -> int:
-    """Extrait l'année la plus fréquente du début du PDF."""
+    """Extrait l'annee la plus frequente du debut du PDF."""
     years = [int(y) for y in YEAR_RE.findall(text_sample)]
     if not years:
         return -1
@@ -105,7 +104,7 @@ def detect_report_year(text_sample: str) -> int:
 
 
 def extract_page_text(page: fitz.Page) -> str:
-    """Extrait le texte d'une page PDF en préservant les tableaux."""
+    """Extrait le texte d'une page PDF en preservant les tableaux."""
     lines = []
     blocks = page.get_text("blocks")
     blocks_sorted = sorted(blocks, key=lambda b: (round(b[1] / 10), b[0]))
@@ -119,7 +118,7 @@ def extract_page_text(page: fitz.Page) -> str:
 
 
 def chunk_text(text: str, size: int, overlap: int) -> List[str]:
-    """Découpe un texte en chunks avec chevauchement."""
+    """Decoupe un texte en chunks avec chevauchement."""
     text = text.strip()
     if not text:
         return []
@@ -148,7 +147,7 @@ def index_pdf(
     doc_name: str,
     year: int,
 ) -> int:
-    """Extrait et insère les pages d'un PDF (chunking par page)."""
+    """Extrait et insere les pages d'un PDF dans la collection."""
     chunks = []
     try:
         doc = fitz.open(str(pdf_path))
@@ -157,7 +156,6 @@ def index_pdf(
             if not text.strip():
                 continue
             page_text = f"--- Page {page_num + 1} ---\n{text}"
-            # Garder la page entière si possible, sinon découper
             if len(page_text) <= MAX_PAGE_SIZE:
                 chunks.append((page_num, page_text))
             else:
@@ -190,7 +188,7 @@ def index_pdf(
             "years_in_chunk": ",".join(str(y) for y in sorted(chunk_years)),
         })
 
-    # Insertion par batch de 100
+    # Upsert par batch de 100
     for i in range(0, len(batch_ids), 100):
         collection.upsert(
             ids=batch_ids[i:i + 100],
@@ -202,22 +200,22 @@ def index_pdf(
 
 
 # =========================
-# Point d'entrée
+# Main
 # =========================
 
 def main():
-    ap = argparse.ArgumentParser(description="Indexer les PDFs dans ChromaDB")
+    ap = argparse.ArgumentParser(description="Indexation des PDFs dans ChromaDB")
     ap.add_argument(
         "--embedding",
         choices=["tfidf_svd", "word2vec", "sentence_transformer"],
         default="tfidf_svd",
-        help="Type d'embedding à utiliser",
+        help="Type d'embedding a utiliser",
     )
-    ap.add_argument("--force", action="store_true", help="Supprimer et recréer la collection")
+    ap.add_argument("--force", action="store_true", help="Supprimer et recreer la collection")
     args = ap.parse_args()
 
     if not PDF_DIR.exists():
-        print(f"[ERREUR] Répertoire PDF introuvable : {PDF_DIR}")
+        print(f"[ERREUR] Repertoire PDF introuvable : {PDF_DIR}")
         return
 
     config = EMBEDDING_CONFIG[args.embedding]
@@ -229,13 +227,12 @@ def main():
     print(f"[INFO] ChromaDB  : {chroma_dir}")
     print(f"[INFO] Collection: {collection_name}")
 
-    # Vérifier que le modèle existe (si nécessaire)
     if model_path and not model_path.exists():
-        print(f"[ERREUR] Modèle introuvable : {model_path}")
-        print("         Exécutez d'abord : python src/01_train_embeddings.py")
+        print(f"[ERREUR] Modele introuvable : {model_path}")
+        print("         Executez d'abord : python src/01_train_embeddings.py")
         return
 
-    # Créer l'embedding
+
     emb_fn = get_embedding_function(
         args.embedding,
         model_path=str(model_path) if model_path else None,
@@ -244,7 +241,6 @@ def main():
     chroma_dir.mkdir(parents=True, exist_ok=True)
     client = chromadb.PersistentClient(path=str(chroma_dir))
 
-    # Supprimer l'ancienne collection si --force
     if args.force:
         try:
             client.delete_collection(collection_name)
@@ -259,11 +255,11 @@ def main():
     )
 
     if collection.count() > 0 and not args.force:
-        print(f"[INFO] La collection contient déjà {collection.count()} éléments.")
-        print("       Utilisez --force pour supprimer et recréer.")
+        print(f"[INFO] La collection contient deja {collection.count()} elements.")
+        print("       Utilisez --force pour supprimer et recreer.")
         return
 
-    # Indexer tous les PDFs
+
     pdf_files = sorted(PDF_DIR.glob("*.pdf"))
     print(f"[INFO] {len(pdf_files)} fichiers PDF trouvés\n")
 
@@ -281,11 +277,11 @@ def main():
         doc_name = detect_company(sample_text)
         year = detect_report_year(sample_text[:2000])
 
-        print(f"\n  📄 {pdf_path.name}")
-        print(f"     Compagnie : {doc_name}  |  Année : {year}")
+        print(f"\n  {pdf_path.name}")
+        print(f"     Compagnie : {doc_name}  |  Annee : {year}")
 
         n = index_pdf(pdf_path, collection, doc_name, year)
-        print(f"     Chunks indexés : {n}")
+        print(f"     Chunks indexes : {n}")
         total_chunks += n
 
     print(f"\n[OK] Total : {collection.count()} chunks dans '{collection_name}'")
